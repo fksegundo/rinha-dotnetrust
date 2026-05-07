@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_IMAGE="${APP_IMAGE:-fksegundo/rinha-dotnetrust-api:submission}"
+APP_IMAGE="${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:submission}"
 RUST_TARGET_CPU="${RUST_TARGET_CPU:-haswell}"
 RINHA_NATIVE_LEAF_SIZE="${RINHA_NATIVE_LEAF_SIZE:-192}"
 

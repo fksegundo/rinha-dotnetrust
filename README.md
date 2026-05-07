@@ -1,104 +1,97 @@
 # rinha-dotnetrust
 
-Submissao da nossa solucao para a Rinha de Backend 2026.
+## PT-BR
 
-Stack final:
+Repositorio principal da solucao `rinha-dotnetrust` para a Rinha de Backend 2026.
+
+Stack:
 
 - API em C# / .NET 10 NativeAOT
 - busca nativa em Rust via P/Invoke
-- indice `RNATIDX2` exato com particionamento, pruning por bounding box e scan AVX2 em blocos de 8 vetores
-- load balancer proprio via imagem Docker separada
-- pre-processamento offline do dataset oficial para gerar os indices dentro da imagem da API
+- indice `RNATIDX2` exato com pruning por bounding box e scan AVX2 em blocos de 8 vetores
+- load balancer proprio em repositorio separado
+- pre-processamento offline do dataset oficial para gerar os indices dentro da imagem
 
-Melhor resultado local validado no compose oficial:
+Melhor validacao local usando as imagens publicadas:
 
-- score: `5607.70`
-- p99: `2.00ms`
+- score: `5867.50`
+- p99: `1.10ms`
 - false positives: `1`
 - false negatives: `0`
 - http errors: `0`
 
-## Estrutura
+Estrutura:
 
-- `src/`: API e core da solucao
-- `native/rinha-native/`: motor de busca nativo em Rust
-- `tools/`: preprocessamento e verificador local
-- `submission/`: Dockerfile da API e `docker-compose.yml` de submissao
-- `bench/`: scripts de smoke e benchmark local
+- `src/`: API e core
+- `native/rinha-native/`: motor nativo em Rust
+- `tools/`: preprocessamento e verificacao
+- `submission/`: Dockerfile da API e compose de validacao local
+- `bench/`: scripts locais
+- `Makefile`: atalhos para build, publish e benchmark
 
-## Repositorio de submissao
+Imagens publicadas:
 
-Este repositorio e o formato "release":
+- `filonsegundo/rinha-dotnetrust-api:submission`
+- `filonsegundo/rinha-dotnetrust-lb:submission`
 
-- sem docs de laboratorio
-- compose apontando para imagens
-- Dockerfile da API mantido para reproducao e para publicar a imagem da aplicacao
+## EN
 
-O laboratorio continua separado em `../rinha-dotnet10`.
+Main repository for the `rinha-dotnetrust` solution targeting Rinha de Backend 2026.
 
-## Imagens
+Stack:
 
-O compose de submissao usa estas variaveis:
+- C# / .NET 10 NativeAOT API
+- native Rust search via P/Invoke
+- exact `RNATIDX2` index with bounding-box pruning and AVX2 8-lane block scans
+- standalone load balancer hosted in a separate repository
+- offline preprocessing of the official dataset to generate the runtime indexes
 
-- `APP_IMAGE` - default: `fksegundo/rinha-dotnetrust-api:submission`
-- `LB_IMAGE` - default: `fksegundo/rinha-dotnetrust-lb:latest`
+Best local validation using the published images:
 
-Voce pode sobrescrever com `.env` dentro de `submission/` ou exportando no shell.
+- score: `5867.50`
+- p99: `1.10ms`
+- false positives: `1`
+- false negatives: `0`
+- http errors: `0`
 
-Exemplo:
+Layout:
+
+- `src/`: API and core logic
+- `native/rinha-native/`: native Rust engine
+- `tools/`: preprocessing and verification tools
+- `submission/`: API Dockerfile and local validation compose
+- `bench/`: local scripts
+- `Makefile`: shortcuts for build, publish and benchmark flows
+
+Published images:
+
+- `filonsegundo/rinha-dotnetrust-api:submission`
+- `filonsegundo/rinha-dotnetrust-lb:submission`
+
+## Quick Start
+
+Build the solution:
 
 ```bash
-cd submission
-cat > .env <<'EOF'
-APP_IMAGE=fksegundo/rinha-dotnetrust-api:submission
-LB_IMAGE=fksegundo/rinha-dotnetrust-lb:latest
-EOF
-docker compose up -d
+make build
 ```
 
-## Publicar a imagem da API
-
-O build da API precisa do dataset oficial em:
-
-`resources/references.json.gz`
-
-Esse arquivo nao entra no git. Coloque-o ali antes do build.
-
-Build local:
+Publish the API image:
 
 ```bash
-docker build \
-  -f submission/Dockerfile \
-  -t fksegundo/rinha-dotnetrust-api:submission \
-  .
+make publish-api
 ```
 
-Push:
+Start the published stack locally:
 
 ```bash
-APP_IMAGE=fksegundo/rinha-dotnetrust-api:submission \
-./scripts/publish-api-image.sh
-```
-
-## Rodar localmente
-
-Com as imagens publicadas:
-
-```bash
-cd submission
-docker compose up -d
+make compose-up
 curl http://localhost:9999/ready
 ```
 
-Para benchmark local, este workspace ainda assume a presenca do repositorio oficial ao lado:
+Run smoke and full benchmark:
 
 ```bash
-./bench/run-smoke.sh
-./bench/run-official-local.sh
+make smoke
+make bench
 ```
-
-## Observacoes
-
-- o `docker-compose.yml` de submissao usa apenas imagens
-- o codigo do load balancer fica em um repositorio separado
-- o build Rust da busca nativa usa `target-cpu=haswell` por default na imagem da API
