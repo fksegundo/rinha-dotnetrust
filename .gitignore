@@ -1,0 +1,9 @@
+bin/
+obj/
+**/bin/
+**/obj/
+*.idx
+*.log
+native/**/target/
+resources/references.json.gz
+submission/.env

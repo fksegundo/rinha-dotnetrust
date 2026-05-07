@@ -1,0 +1,71 @@
+services:
+  lb:
+    image: ${LB_IMAGE:-fksegundo/rinha-dotnetrust-lb:latest}
+    restart: always
+    depends_on:
+      - api1
+      - api2
+    environment:
+      - UPSTREAMS=/sockets/api1.sock,/sockets/api2.sock
+      - PORT=9999
+      - BUF_SIZE=4096
+      - WORKERS=1
+    ports:
+      - "9999:9999"
+    volumes:
+      - sockets:/sockets
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: "30MB"
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    security_opt:
+      - seccomp:unconfined
+
+  api1:
+    image: ${APP_IMAGE:-fksegundo/rinha-dotnetrust-api:submission}
+    restart: always
+    user: "0:0"
+    environment:
+      RINHA_SEARCH_BACKEND: rust
+      RINHA_SOCKET: /sockets/api1.sock
+      RINHA_INDEX_PATH: /app/index/rinha.idx
+      RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    volumes:
+      - sockets:/sockets
+    deploy:
+      resources:
+        limits:
+          cpus: "0.45"
+          memory: "155MB"
+
+  api2:
+    image: ${APP_IMAGE:-fksegundo/rinha-dotnetrust-api:submission}
+    restart: always
+    user: "0:0"
+    environment:
+      RINHA_SEARCH_BACKEND: rust
+      RINHA_SOCKET: /sockets/api2.sock
+      RINHA_INDEX_PATH: /app/index/rinha.idx
+      RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
+      DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+    volumes:
+      - sockets:/sockets
+    deploy:
+      resources:
+        limits:
+          cpus: "0.45"
+          memory: "155MB"
+
+volumes:
+  sockets:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=4m,mode=0777"
