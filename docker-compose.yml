@@ -1,6 +1,6 @@
 services:
   lb:
-    image: ${LB_IMAGE:-fksegundo/rinha-dotnetrust-lb:latest}
+    image: ${LB_IMAGE:-filonsegundo/rinha-dotnetrust-lb:submission}
     restart: always
     depends_on:
       - api1
@@ -27,7 +27,7 @@ services:
       - seccomp:unconfined
 
   api1:
-    image: ${APP_IMAGE:-fksegundo/rinha-dotnetrust-api:submission}
+    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:submission}
     restart: always
     user: "0:0"
     environment:
@@ -45,7 +45,7 @@ services:
           memory: "155MB"
 
   api2:
-    image: ${APP_IMAGE:-fksegundo/rinha-dotnetrust-api:submission}
+    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:submission}
     restart: always
     user: "0:0"
     environment:
