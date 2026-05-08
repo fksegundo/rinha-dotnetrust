@@ -7,7 +7,7 @@ RINHA_NATIVE_LEAF_SIZE ?= 192
 DOTNET_CLI_HOME ?= /tmp/dotnet-home
 OFFICIAL_REPO ?= ../rinha-de-backend-2026-main
 
-.PHONY: build native build-api publish-api compose-up compose-down smoke bench verify-compose sync-resources
+.PHONY: build native build-api publish-api compose-up compose-down compose-pull smoke smoke-build bench bench-build bench-diagnostic bench-matrix verify-compose sync-resources
 
 build:
 	DOTNET_CLI_HOME=$(DOTNET_CLI_HOME) dotnet build src/Rinha.Api/Rinha.Api.csproj -c Release -v minimal
@@ -41,6 +41,9 @@ publish-api:
 verify-compose:
 	docker compose -f submission/docker-compose.yml config >/dev/null
 
+compose-pull:
+	APP_IMAGE=$(APP_IMAGE) LB_IMAGE=$(LB_IMAGE) docker compose -f submission/docker-compose.yml pull
+
 compose-up:
 	APP_IMAGE=$(APP_IMAGE) LB_IMAGE=$(LB_IMAGE) docker compose -f submission/docker-compose.yml up -d
 
@@ -50,5 +53,17 @@ compose-down:
 smoke:
 	./bench/run-smoke.sh
 
+smoke-build:
+	./bench/run-build-smoke.sh
+
 bench:
 	./bench/run-official-local.sh
+
+bench-build:
+	./bench/run-build-benchmark.sh
+
+bench-diagnostic:
+	COMPOSE_FILES=submission/docker-compose.yml:submission/docker-compose.diagnostic.yml ./bench/run-official-local.sh
+
+bench-matrix:
+	./bench/run-diagnostic-matrix.sh

@@ -95,3 +95,11 @@ Run smoke and full benchmark:
 make smoke
 make bench
 ```
+
+Benchmark notes:
+
+- `make smoke` and `make bench` now use the published images and run k6 in Docker.
+- `make smoke-build` and `make bench-build` keep the old local rebuild flow.
+- `make bench-diagnostic` adds the diagnostic compose overlay so you can vary CPU split, probes, and cpuset without editing the submission compose.
+- `make bench-matrix` runs the versioned scenario table in `bench/diagnostic-matrix.tsv` and writes a `summary.tsv` plus one artifact directory per scenario.
+- Benchmark artifacts and runtime evidence are written under `artifacts/`.

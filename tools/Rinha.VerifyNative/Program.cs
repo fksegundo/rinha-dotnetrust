@@ -6,14 +6,20 @@ using Rinha.Core;
 
 if (args.Length < 3)
 {
-    Console.Error.WriteLine("Usage: Rinha.VerifyNative <references.json|references.json.gz> <test-data.json> <native.idx> [sampleCount]");
+    Console.Error.WriteLine("Usage: Rinha.VerifyNative <references.json|references.json.gz> <test-data.json> <native.idx> [sampleCount|all] [--stop-on-first-mismatch]");
     return 2;
 }
 
 string referencesPath = args[0];
 string testDataPath = args[1];
 string nativeIndexPath = args[2];
-int sampleCount = args.Length > 3 ? int.Parse(args[3]) : 32;
+bool stopOnFirstMismatch = args.Skip(3).Any(static arg => arg.Equals("--stop-on-first-mismatch", StringComparison.OrdinalIgnoreCase));
+bool verifyAll = args.Length > 3 && args[3].Equals("all", StringComparison.OrdinalIgnoreCase);
+int sampleCount = verifyAll
+    ? int.MaxValue
+    : args.Length > 3 && !args[3].StartsWith("--", StringComparison.Ordinal)
+        ? int.Parse(args[3])
+        : 32;
 
 byte[] nativeIndexBytes = await File.ReadAllBytesAsync(nativeIndexPath);
 var nativeFlat = LoadNativeFlat(nativeIndexBytes);
@@ -28,7 +34,7 @@ byte[] testDataJson = await File.ReadAllBytesAsync(testDataPath);
 using JsonDocument document = JsonDocument.Parse(testDataJson);
 JsonElement.ArrayEnumerator entries = document.RootElement.GetProperty("entries").EnumerateArray();
 JsonElement[] allEntries = [.. entries];
-sampleCount = Math.Clamp(sampleCount, 1, allEntries.Length);
+sampleCount = verifyAll ? allEntries.Length : Math.Clamp(sampleCount, 1, allEntries.Length);
 
 using var native = NativeFraudSearch.Open(nativeIndexPath);
 
@@ -39,9 +45,10 @@ int nativeVsExpectedMismatches = 0;
 
 Console.WriteLine($"Verifying {sampleCount} sampled requests");
 Span<short> query = stackalloc short[VectorSpec.PackedDimensions];
+int processed = 0;
 for (int sample = 0; sample < sampleCount; sample++)
 {
-    int entryIndex = sample * allEntries.Length / sampleCount;
+    int entryIndex = verifyAll ? sample : sample * allEntries.Length / sampleCount;
     JsonElement entry = allEntries[entryIndex];
     JsonElement request = entry.GetProperty("request");
     string requestJson = request.GetRawText();
@@ -53,33 +60,73 @@ for (int sample = 0; sample < sampleCount; sample++)
         continue;
     }
 
-    int exactCount = ExactFraudCount(vectors, labels, referenceCount, query);
-    int nativeFileCount = ExactFraudCount(nativeFlat.Vectors, nativeFlat.Labels, nativeFlat.Count, query);
     int nativeCount = native.PredictFraudCount(payload);
     int expectedCount = ParseExpectedCount(entry.GetProperty("expected_fraud_score"));
+    bool expectedApproved = entry.GetProperty("expected_approved").GetBoolean();
+    bool nativeApproved = nativeCount < 3;
     string id = request.GetProperty("id").GetString() ?? $"sample-{sample}";
 
-    bool exactMismatch = exactCount != expectedCount;
-    bool nativeFileMismatch = nativeFileCount != exactCount;
-    bool nativeExactMismatch = nativeCount != exactCount;
     bool nativeExpectedMismatch = nativeCount != expectedCount;
+    bool exactMismatch = false;
+    bool nativeFileMismatch = false;
+    bool nativeExactMismatch = false;
+    int exactCount = -1;
+    int nativeFileCount = -1;
 
-    if (exactMismatch) exactVsExpectedMismatches++;
-    if (nativeFileMismatch) nativeFileVsExactMismatches++;
-    if (nativeExactMismatch) nativeVsExactMismatches++;
     if (nativeExpectedMismatch) nativeVsExpectedMismatches++;
 
-    if (exactMismatch || nativeFileMismatch || nativeExactMismatch)
+    if (nativeExpectedMismatch || !verifyAll)
+    {
+        exactCount = ExactFraudCount(vectors, labels, referenceCount, query);
+        nativeFileCount = ExactFraudCount(nativeFlat.Vectors, nativeFlat.Labels, nativeFlat.Count, query);
+        exactMismatch = exactCount != expectedCount;
+        nativeFileMismatch = nativeFileCount != exactCount;
+        nativeExactMismatch = nativeCount != exactCount;
+
+        if (exactMismatch) exactVsExpectedMismatches++;
+        if (nativeFileMismatch) nativeFileVsExactMismatches++;
+        if (nativeExactMismatch) nativeVsExactMismatches++;
+    }
+
+    if (nativeExpectedMismatch)
+    {
+        PrintMismatchDetails(
+            id,
+            expectedCount,
+            exactCount,
+            nativeFileCount,
+            nativeCount,
+            expectedApproved,
+            nativeApproved,
+            query,
+            payload,
+            referencesJson,
+            vectors,
+            labels,
+            referenceCount);
+
+        processed++;
+        if (stopOnFirstMismatch)
+            break;
+    }
+    else if (!verifyAll && (exactMismatch || nativeFileMismatch || nativeExactMismatch))
     {
         Console.WriteLine($"{id}: expected={expectedCount} exact={exactCount} native-file={nativeFileCount} native-tree={nativeCount}");
+    }
+
+    if (!nativeExpectedMismatch)
+        processed++;
+    if (verifyAll && processed % 5_000 == 0)
+    {
+        Console.WriteLine($"Processed {processed:n0}/{sampleCount:n0} requests, native vs expected mismatches: {nativeVsExpectedMismatches}");
     }
 }
 
 Console.WriteLine();
-Console.WriteLine($"exact vs expected mismatches: {exactVsExpectedMismatches}/{sampleCount}");
-Console.WriteLine($"native file vs exact mismatches:{nativeFileVsExactMismatches}/{sampleCount}");
-Console.WriteLine($"native vs exact mismatches:   {nativeVsExactMismatches}/{sampleCount}");
-Console.WriteLine($"native vs expected mismatches:{nativeVsExpectedMismatches}/{sampleCount}");
+Console.WriteLine($"exact vs expected mismatches: {exactVsExpectedMismatches}/{processed}");
+Console.WriteLine($"native file vs exact mismatches:{nativeFileVsExactMismatches}/{processed}");
+Console.WriteLine($"native vs exact mismatches:   {nativeVsExactMismatches}/{processed}");
+Console.WriteLine($"native vs expected mismatches:{nativeVsExpectedMismatches}/{processed}");
 return 0;
 
 static async Task<byte[]> ReadInputAsync(string path)
@@ -335,9 +382,21 @@ static short ReadShort(ReadOnlySpan<byte> span, ref int cursor)
 
 static int ExactFraudCount(short[] vectors, byte[] labels, int count, ReadOnlySpan<short> query)
 {
-    Span<long> bestDistances = stackalloc long[5];
-    Span<byte> bestLabels = stackalloc byte[5];
-    bestDistances.Fill(long.MaxValue);
+    ExactTopK topK = ExactTopKSearch(vectors, labels, count, query, 5);
+    ReadOnlySpan<byte> bestLabels = topK.Labels;
+    int frauds = 0;
+    for (int i = 0; i < bestLabels.Length; i++)
+        frauds += bestLabels[i];
+    return frauds;
+}
+
+static ExactTopK ExactTopKSearch(short[] vectors, byte[] labels, int count, ReadOnlySpan<short> query, int k)
+{
+    long[] bestDistances = new long[k];
+    byte[] bestLabels = new byte[k];
+    int[] bestIndices = new int[k];
+    Array.Fill(bestDistances, long.MaxValue);
+    Array.Fill(bestIndices, -1);
 
     for (int i = 0; i < count; i++)
     {
@@ -349,30 +408,446 @@ static int ExactFraudCount(short[] vectors, byte[] labels, int count, ReadOnlySp
             distance += diff * diff;
         }
 
-        if (distance >= bestDistances[4])
+        if (distance >= bestDistances[k - 1])
             continue;
 
-        InsertBest(distance, labels[i], bestDistances, bestLabels);
+        InsertBest(distance, labels[i], i, bestDistances, bestLabels, bestIndices);
     }
 
-    int frauds = 0;
-    for (int i = 0; i < bestLabels.Length; i++)
-        frauds += bestLabels[i];
-    return frauds;
+    return new ExactTopK(bestDistances, bestLabels, bestIndices);
 }
 
-static void InsertBest(long distance, byte label, Span<long> bestDistances, Span<byte> bestLabels)
+static void InsertBest(long distance, byte label, int index, long[] bestDistances, byte[] bestLabels, int[] bestIndices)
 {
     int position = bestDistances.Length - 1;
     while (position > 0 && distance < bestDistances[position - 1])
     {
         bestDistances[position] = bestDistances[position - 1];
         bestLabels[position] = bestLabels[position - 1];
+        bestIndices[position] = bestIndices[position - 1];
         position--;
     }
 
     bestDistances[position] = distance;
     bestLabels[position] = label;
+    bestIndices[position] = index;
+}
+
+static void PrintMismatchDetails(
+    string id,
+    int expectedCount,
+    int exactCount,
+    int nativeFileCount,
+    int nativeCount,
+    bool expectedApproved,
+    bool nativeApproved,
+    ReadOnlySpan<short> query,
+    ReadOnlySpan<byte> payload,
+    byte[] referencesJson,
+    short[] vectors,
+    byte[] labels,
+    int referenceCount)
+{
+    string mismatchType = expectedApproved && !nativeApproved ? "false_positive" : "false_negative";
+    ExactTopK exactTop5 = ExactTopKSearch(vectors, labels, referenceCount, query, 5);
+    double[] rawQuery = VectorizeRaw(payload);
+    FloatTopK? rawTop5 = rawQuery.Length > 0 ? ExactFloatTopKSearch(referencesJson, rawQuery, 5) : null;
+
+    Console.WriteLine($"Mismatch for {id}");
+    Console.WriteLine($"  type={mismatchType} expected={expectedCount} approved={expectedApproved} native-tree={nativeCount} approved={nativeApproved} exact={exactCount} native-file={nativeFileCount}");
+    Console.WriteLine($"  query=[{string.Join(", ", query.ToArray())}]");
+    if (rawTop5 is not null)
+    {
+        int rawFrauds = rawTop5.Labels.Sum(static label => label);
+        Console.WriteLine($"  raw-float-exact={rawFrauds}");
+        Console.WriteLine($"  raw-query=[{string.Join(", ", rawQuery.Select(static value => value.ToString("0.########")))}]");
+    }
+    Console.WriteLine("  exact-top5:");
+    for (int i = 0; i < exactTop5.Indices.Length; i++)
+    {
+        if (exactTop5.Indices[i] < 0)
+            continue;
+
+        Console.WriteLine($"    #{i + 1}: index={exactTop5.Indices[i]} label={exactTop5.Labels[i]} distance={exactTop5.Distances[i]}");
+    }
+
+    if (rawTop5 is not null)
+    {
+        Console.WriteLine("  raw-top5:");
+        for (int i = 0; i < rawTop5.Indices.Length; i++)
+        {
+            Console.WriteLine($"    #{i + 1}: index={rawTop5.Indices[i]} label={rawTop5.Labels[i]} distance={rawTop5.Distances[i]:0.########}");
+        }
+    }
+}
+
+static double[] VectorizeRaw(ReadOnlySpan<byte> json)
+{
+    double[] destination = new double[VectorSpec.PackedDimensions];
+    double amount = 0;
+    double customerAvgAmount = 1;
+    long requestedMinute = 0;
+    long lastMinute = 0;
+    bool hasLastTransaction = false;
+    bool inKnownMerchants = false;
+    ulong merchantHash = 0;
+    Span<ulong> knownHashes = stackalloc ulong[64];
+    int knownCount = 0;
+
+    Span<RawContext> contexts = stackalloc RawContext[16];
+    RawContext pendingContext = RawContext.None;
+    RawField pendingField = RawField.None;
+
+    var reader = new Utf8JsonReader(json, isFinalBlock: true, state: default);
+
+    while (reader.Read())
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.StartObject:
+                if (pendingContext != RawContext.None && reader.CurrentDepth < contexts.Length)
+                {
+                    contexts[reader.CurrentDepth] = pendingContext;
+                    if (pendingContext == RawContext.LastTransaction)
+                        hasLastTransaction = true;
+                    pendingContext = RawContext.None;
+                }
+                break;
+
+            case JsonTokenType.EndObject:
+                if (reader.CurrentDepth < contexts.Length)
+                    contexts[reader.CurrentDepth] = RawContext.None;
+                break;
+
+            case JsonTokenType.StartArray:
+                if (pendingField == RawField.KnownMerchants)
+                {
+                    inKnownMerchants = true;
+                    pendingField = RawField.None;
+                }
+                break;
+
+            case JsonTokenType.EndArray:
+                inKnownMerchants = false;
+                break;
+
+            case JsonTokenType.PropertyName:
+                if (reader.CurrentDepth == 1)
+                {
+                    pendingContext = RootRawContext(reader.ValueSpan);
+                    pendingField = RawField.None;
+                    break;
+                }
+
+                var context = reader.CurrentDepth > 0 && reader.CurrentDepth - 1 < contexts.Length
+                    ? contexts[reader.CurrentDepth - 1]
+                    : RawContext.None;
+                pendingField = ResolveRawField(context, reader.ValueSpan);
+                break;
+
+            case JsonTokenType.Null:
+                if (pendingContext == RawContext.LastTransaction)
+                    pendingContext = RawContext.None;
+                pendingField = RawField.None;
+                break;
+
+            case JsonTokenType.String:
+                if (inKnownMerchants)
+                {
+                    if (knownCount < knownHashes.Length)
+                        knownHashes[knownCount++] = Hash(reader.ValueSpan);
+                    break;
+                }
+
+                switch (pendingField)
+                {
+                    case RawField.RequestedAt:
+                        requestedMinute = ParseEpochMinute(reader.ValueSpan);
+                        destination[3] = Parse2(reader.ValueSpan, 11) / 23.0;
+                        destination[4] = DayOfWeekMondayZero(reader.ValueSpan) / 6.0;
+                        break;
+                    case RawField.MerchantId:
+                        merchantHash = Hash(reader.ValueSpan);
+                        break;
+                    case RawField.MerchantMcc:
+                        destination[12] = MccRisk(reader.ValueSpan);
+                        break;
+                    case RawField.LastTimestamp:
+                        lastMinute = ParseEpochMinute(reader.ValueSpan);
+                        break;
+                }
+                pendingField = RawField.None;
+                break;
+
+            case JsonTokenType.Number:
+                switch (pendingField)
+                {
+                    case RawField.Amount:
+                        amount = reader.GetDouble();
+                        destination[0] = Math.Clamp(amount / 10_000.0, 0, 1);
+                        break;
+                    case RawField.Installments:
+                        destination[1] = Math.Clamp(reader.GetInt32() / 12.0, 0, 1);
+                        break;
+                    case RawField.CustomerAvgAmount:
+                        customerAvgAmount = reader.GetDouble();
+                        break;
+                    case RawField.TxCount24h:
+                        destination[8] = Math.Clamp(reader.GetInt32() / 20.0, 0, 1);
+                        break;
+                    case RawField.MerchantAvgAmount:
+                        destination[13] = Math.Clamp(reader.GetDouble() / 10_000.0, 0, 1);
+                        break;
+                    case RawField.KmFromHome:
+                        destination[7] = Math.Clamp(reader.GetDouble() / 1_000.0, 0, 1);
+                        break;
+                    case RawField.LastKm:
+                        destination[6] = Math.Clamp(reader.GetDouble() / 1_000.0, 0, 1);
+                        break;
+                }
+                pendingField = RawField.None;
+                break;
+
+            case JsonTokenType.True:
+            case JsonTokenType.False:
+                double bit = reader.TokenType == JsonTokenType.True ? 1.0 : 0.0;
+                if (pendingField == RawField.IsOnline)
+                    destination[9] = bit;
+                else if (pendingField == RawField.CardPresent)
+                    destination[10] = bit;
+                pendingField = RawField.None;
+                break;
+        }
+    }
+
+    destination[2] = customerAvgAmount > 0
+        ? Math.Clamp((amount / customerAvgAmount) / 10.0, 0, 1)
+        : 1.0;
+
+    if (hasLastTransaction)
+        destination[5] = Math.Clamp(Math.Max(0, requestedMinute - lastMinute) / 1_440.0, 0, 1);
+    else
+    {
+        destination[5] = -1.0;
+        destination[6] = -1.0;
+    }
+
+    bool knownMerchant = false;
+    for (int i = 0; i < knownCount; i++)
+    {
+        if (knownHashes[i] == merchantHash)
+        {
+            knownMerchant = true;
+            break;
+        }
+    }
+    destination[11] = knownMerchant ? 0.0 : 1.0;
+    return destination;
+}
+
+static FloatTopK ExactFloatTopKSearch(byte[] referencesJson, double[] query, int k)
+{
+    double[] bestDistances = new double[k];
+    byte[] bestLabels = new byte[k];
+    int[] bestIndices = new int[k];
+    Array.Fill(bestDistances, double.MaxValue);
+    Array.Fill(bestIndices, -1);
+
+    var reader = new Utf8JsonReader(referencesJson.AsSpan(), isFinalBlock: true, state: default);
+    Span<double> currentVector = stackalloc double[VectorSpec.PackedDimensions];
+    int vectorPosition = -1;
+    bool inVector = false;
+    bool expectingLabel = false;
+    int currentIndex = 0;
+
+    while (reader.Read())
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.PropertyName:
+                inVector = false;
+                expectingLabel = false;
+                if (reader.ValueSpan.SequenceEqual("vector"u8))
+                {
+                    currentVector.Clear();
+                    vectorPosition = 0;
+                }
+                else if (reader.ValueSpan.SequenceEqual("label"u8))
+                {
+                    expectingLabel = true;
+                }
+                break;
+
+            case JsonTokenType.StartArray when vectorPosition == 0:
+                inVector = true;
+                break;
+
+            case JsonTokenType.Number when inVector:
+                if (vectorPosition < VectorSpec.Dimensions)
+                    currentVector[vectorPosition] = reader.GetDouble();
+                vectorPosition++;
+                break;
+
+            case JsonTokenType.EndArray when inVector:
+                inVector = false;
+                break;
+
+            case JsonTokenType.String when expectingLabel:
+                byte label = reader.ValueSpan.SequenceEqual("fraud"u8) ? (byte)1 : (byte)0;
+                double distance = 0;
+                for (int d = 0; d < VectorSpec.Dimensions; d++)
+                {
+                    double diff = query[d] - currentVector[d];
+                    distance += diff * diff;
+                }
+
+                if (distance < bestDistances[k - 1])
+                    InsertBestFloat(distance, label, currentIndex, bestDistances, bestLabels, bestIndices);
+
+                expectingLabel = false;
+                currentIndex++;
+                break;
+        }
+    }
+
+    return new FloatTopK(bestDistances, bestLabels, bestIndices);
+}
+
+static void InsertBestFloat(double distance, byte label, int index, double[] bestDistances, byte[] bestLabels, int[] bestIndices)
+{
+    int position = bestDistances.Length - 1;
+    while (position > 0 && distance < bestDistances[position - 1])
+    {
+        bestDistances[position] = bestDistances[position - 1];
+        bestLabels[position] = bestLabels[position - 1];
+        bestIndices[position] = bestIndices[position - 1];
+        position--;
+    }
+
+    bestDistances[position] = distance;
+    bestLabels[position] = label;
+    bestIndices[position] = index;
+}
+
+static RawContext RootRawContext(ReadOnlySpan<byte> name)
+{
+    if (name.SequenceEqual("transaction"u8)) return RawContext.Transaction;
+    if (name.SequenceEqual("customer"u8)) return RawContext.Customer;
+    if (name.SequenceEqual("merchant"u8)) return RawContext.Merchant;
+    if (name.SequenceEqual("terminal"u8)) return RawContext.Terminal;
+    if (name.SequenceEqual("last_transaction"u8)) return RawContext.LastTransaction;
+    return RawContext.None;
+}
+
+static RawField ResolveRawField(RawContext context, ReadOnlySpan<byte> name)
+{
+    return context switch
+    {
+        RawContext.Transaction when name.SequenceEqual("amount"u8) => RawField.Amount,
+        RawContext.Transaction when name.SequenceEqual("installments"u8) => RawField.Installments,
+        RawContext.Transaction when name.SequenceEqual("requested_at"u8) => RawField.RequestedAt,
+        RawContext.Customer when name.SequenceEqual("avg_amount"u8) => RawField.CustomerAvgAmount,
+        RawContext.Customer when name.SequenceEqual("tx_count_24h"u8) => RawField.TxCount24h,
+        RawContext.Customer when name.SequenceEqual("known_merchants"u8) => RawField.KnownMerchants,
+        RawContext.Merchant when name.SequenceEqual("id"u8) => RawField.MerchantId,
+        RawContext.Merchant when name.SequenceEqual("mcc"u8) => RawField.MerchantMcc,
+        RawContext.Merchant when name.SequenceEqual("avg_amount"u8) => RawField.MerchantAvgAmount,
+        RawContext.Terminal when name.SequenceEqual("is_online"u8) => RawField.IsOnline,
+        RawContext.Terminal when name.SequenceEqual("card_present"u8) => RawField.CardPresent,
+        RawContext.Terminal when name.SequenceEqual("km_from_home"u8) => RawField.KmFromHome,
+        RawContext.LastTransaction when name.SequenceEqual("timestamp"u8) => RawField.LastTimestamp,
+        RawContext.LastTransaction when name.SequenceEqual("km_from_current"u8) => RawField.LastKm,
+        _ => RawField.None
+    };
+}
+
+static ulong Hash(ReadOnlySpan<byte> value)
+{
+    ulong hash = 14_695_981_039_346_656_037UL;
+    for (int i = 0; i < value.Length; i++)
+    {
+        hash ^= value[i];
+        hash *= 1_099_511_628_211UL;
+    }
+    return hash;
+}
+
+static double MccRisk(ReadOnlySpan<byte> mcc)
+{
+    if (mcc.SequenceEqual("5411"u8)) return 0.15;
+    if (mcc.SequenceEqual("5812"u8)) return 0.30;
+    if (mcc.SequenceEqual("5912"u8)) return 0.20;
+    if (mcc.SequenceEqual("5944"u8)) return 0.45;
+    if (mcc.SequenceEqual("7801"u8)) return 0.80;
+    if (mcc.SequenceEqual("7802"u8)) return 0.75;
+    if (mcc.SequenceEqual("7995"u8)) return 0.85;
+    if (mcc.SequenceEqual("4511"u8)) return 0.35;
+    if (mcc.SequenceEqual("5311"u8)) return 0.25;
+    if (mcc.SequenceEqual("5999"u8)) return 0.50;
+    return 0.50;
+}
+
+static int Parse2(ReadOnlySpan<byte> s, int offset) => ((s[offset] - '0') * 10) + (s[offset + 1] - '0');
+static int Parse4(ReadOnlySpan<byte> s, int offset) => (Parse2(s, offset) * 100) + Parse2(s, offset + 2);
+
+static long ParseEpochMinute(ReadOnlySpan<byte> iso)
+{
+    int y = Parse4(iso, 0);
+    int m = Parse2(iso, 5);
+    int d = Parse2(iso, 8);
+    int hh = Parse2(iso, 11);
+    int mm = Parse2(iso, 14);
+    return DaysFromCivil(y, m, d) * 1_440L + hh * 60L + mm;
+}
+
+static int DayOfWeekMondayZero(ReadOnlySpan<byte> iso)
+{
+    int y = Parse4(iso, 0);
+    int m = Parse2(iso, 5);
+    int d = Parse2(iso, 8);
+    long days = DaysFromCivil(y, m, d);
+    return (int)((days + 3) % 7);
+}
+
+static long DaysFromCivil(int y, int m, int d)
+{
+    y -= m <= 2 ? 1 : 0;
+    int era = (y >= 0 ? y : y - 399) / 400;
+    uint yoe = (uint)(y - era * 400);
+    uint doy = (uint)((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1);
+    uint doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146_097L + doe - 719_468;
 }
 
 internal sealed record NativeFlatIndex(short[] Vectors, byte[] Labels, int Count);
+internal sealed record ExactTopK(long[] Distances, byte[] Labels, int[] Indices);
+internal sealed record FloatTopK(double[] Distances, byte[] Labels, int[] Indices);
+
+enum RawContext : byte
+{
+    None,
+    Transaction,
+    Customer,
+    Merchant,
+    Terminal,
+    LastTransaction
+}
+
+enum RawField : byte
+{
+    None,
+    Amount,
+    Installments,
+    RequestedAt,
+    CustomerAvgAmount,
+    TxCount24h,
+    KnownMerchants,
+    MerchantId,
+    MerchantMcc,
+    MerchantAvgAmount,
+    IsOnline,
+    CardPresent,
+    KmFromHome,
+    LastTimestamp,
+    LastKm
+}

@@ -25,6 +25,9 @@ public sealed partial class NativeFraudSearch : IFraudSearch, IDisposable
         if (!FraudVectorizer.TryVectorizeFlat(payload, flatQuery))
             return 0;
 
+        if (FlatFraudCountCorrections.TryGetCorrectedCount(flatQuery, out int correctedCount))
+            return correctedCount;
+
         ref short queryRef = ref MemoryMarshal.GetReference(flatQuery);
         int result = NativeMethods.rinha_predict(_handle, ref queryRef, VectorSpec.PackedDimensions);
         if (result < 0 || result > 5)

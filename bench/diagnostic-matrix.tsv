@@ -1,0 +1,6 @@
+scenario	lb_cpus	api1_cpus	api2_cpus	lb_cpuset	api1_cpuset	api2_cpuset	lb_workers	lb_buf_size	min_threads	rinha_probes	max_candidates	native_fast_probes	native_full_probes
+baseline_cpuset	0.10	0.45	0.45	0	1	2	1	4096		2	768	16	64
+lb_015	0.15	0.425	0.425	0	1	2	1	4096		2	768	16	64
+lb_020	0.20	0.40	0.40	0	1	2	1	4096		2	768	16	64
+spread_cores	0.10	0.45	0.45	0	2	4	1	4096		2	768	16	64
+warm_threads8	0.10	0.45	0.45	0	1	2	1	4096	8	2	768	16	64

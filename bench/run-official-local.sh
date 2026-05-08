@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/../submission"
-docker compose up -d --build
-for _ in $(seq 1 30); do
-  if curl -fsS http://localhost:9999/ready >/dev/null; then
-    break
-  fi
-  sleep 1
-done
-cd ../../rinha-de-backend-2026-main/test
-k6 run test.js
-cat results.json
+source "$(dirname "$0")/lib.sh"
+
+RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
+ARTIFACT_DIR="${ARTIFACT_DIR:-${REPO_ROOT}/artifacts/bench/${RUN_ID}}"
+WORKDIR="${REPO_ROOT}/test-workdir/${RUN_ID}"
+
+mkdir -p "${ARTIFACT_DIR}"
+
+compose_cmd down -v --remove-orphans || true
+compose_cmd pull
+compose_cmd up -d
+wait_ready_stable
+
+prepare_k6_workdir "${WORKDIR}"
+run_k6_in_docker "test.js" "${WORKDIR}"
+cp "${WORKDIR}/test/results.json" "${ARTIFACT_DIR}/results.json"
+collect_runtime_evidence "${ARTIFACT_DIR}"
+
+cat "${ARTIFACT_DIR}/results.json"

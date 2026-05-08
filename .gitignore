@@ -7,3 +7,5 @@ obj/
 native/**/target/
 resources/references.json.gz
 submission/.env
+artifacts/
+test-workdir/
