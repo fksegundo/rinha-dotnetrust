@@ -26,8 +26,6 @@ services:
       nofile:
         soft: 65535
         hard: 65535
-    security_opt:
-      - seccomp:unconfined
 
   api1:
     image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.3}
