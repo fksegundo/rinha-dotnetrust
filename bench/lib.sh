@@ -26,7 +26,7 @@ compose_cmd() {
     local args=()
     mapfile -t args < <(compose_file_args)
     COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME}" \
-    APP_IMAGE="${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:submission}" \
+    APP_IMAGE="${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:submissionv2}" \
     LB_IMAGE="${LB_IMAGE:-filonsegundo/rinha-dotnetrust-lb:submission}" \
     docker compose "${args[@]}" "$@"
 }
@@ -83,9 +83,9 @@ collect_runtime_evidence() {
         docker stats --no-stream --format json "${container_ids[@]}" > "${output_dir}/docker.stats.jsonl"
     fi
 
-    if docker image inspect "${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:submission}" >/dev/null 2>&1; then
+    if docker image inspect "${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:submissionv2}" >/dev/null 2>&1; then
         docker image inspect \
-            "${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:submission}" \
+            "${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:submissionv2}" \
             "${LB_IMAGE:-filonsegundo/rinha-dotnetrust-lb:submission}" \
             > "${output_dir}/images.inspect.json"
     fi

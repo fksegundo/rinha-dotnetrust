@@ -14,9 +14,9 @@ Stack:
 
 Melhor validacao local usando as imagens publicadas:
 
-- score: `5867.50`
+- score: `5959.38`
 - p99: `1.10ms`
-- false positives: `1`
+- false positives: `0`
 - false negatives: `0`
 - http errors: `0`
 
@@ -31,7 +31,7 @@ Estrutura:
 
 Imagens publicadas:
 
-- `filonsegundo/rinha-dotnetrust-api:submission`
+- `filonsegundo/rinha-dotnetrust-api:submissionv2`
 - `filonsegundo/rinha-dotnetrust-lb:submission`
 
 ## EN
@@ -48,9 +48,9 @@ Stack:
 
 Best local validation using the published images:
 
-- score: `5867.50`
+- score: `5959.38`
 - p99: `1.10ms`
-- false positives: `1`
+- false positives: `0`
 - false negatives: `0`
 - http errors: `0`
 
@@ -65,7 +65,7 @@ Layout:
 
 Published images:
 
-- `filonsegundo/rinha-dotnetrust-api:submission`
+- `filonsegundo/rinha-dotnetrust-api:submissionv2`
 - `filonsegundo/rinha-dotnetrust-lb:submission`
 
 ## Quick Start

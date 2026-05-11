@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-APP_IMAGE ?= filonsegundo/rinha-dotnetrust-api:submission
+APP_IMAGE ?= filonsegundo/rinha-dotnetrust-api:submissionv2
 LB_IMAGE ?= filonsegundo/rinha-dotnetrust-lb:submission
 RUST_TARGET_CPU ?= haswell
 RINHA_NATIVE_LEAF_SIZE ?= 192
