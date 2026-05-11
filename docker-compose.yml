@@ -34,6 +34,7 @@ services:
     restart: always
     user: "0:0"
     environment:
+      DOTNET_PROCESSOR_COUNT: "1"
       RINHA_SEARCH_BACKEND: ${RINHA_SEARCH_BACKEND:-rust}
       RINHA_SOCKET: /sockets/api1.sock
       RINHA_INDEX_PATH: /app/index/rinha.idx
@@ -58,6 +59,7 @@ services:
     restart: always
     user: "0:0"
     environment:
+      DOTNET_PROCESSOR_COUNT: "1"
       RINHA_SEARCH_BACKEND: ${RINHA_SEARCH_BACKEND:-rust}
       RINHA_SOCKET: /sockets/api2.sock
       RINHA_INDEX_PATH: /app/index/rinha.idx
