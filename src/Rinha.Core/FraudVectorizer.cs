@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Buffers.Text;
 
 namespace Rinha.Core;
 
@@ -207,6 +208,9 @@ public static class FraudVectorizer
 
     public static bool TryVectorizeFlat(ReadOnlySpan<byte> json, Span<short> destination)
     {
+        if (TryVectorizeFlatOfficial(json, destination))
+            return true;
+
         destination.Clear();
 
         double amount = 0;
@@ -375,6 +379,240 @@ public static class FraudVectorizer
         }
         destination[11] = knownMerchant ? (short)0 : (short)VectorSpec.FlatScale;
         return true;
+    }
+
+    private static bool TryVectorizeFlatOfficial(ReadOnlySpan<byte> json, Span<short> destination)
+    {
+        destination.Clear();
+
+        int cursor = 0;
+        Span<ulong> knownHashes = stackalloc ulong[64];
+        int knownCount = 0;
+
+        try
+        {
+            if (!TryReadDouble(json, "\"amount\""u8, ref cursor, out double amount))
+                return false;
+            destination[0] = VectorSpec.QuantizeFlat(amount / 10_000.0);
+
+            if (!TryReadInt(json, "\"installments\""u8, ref cursor, out int installments))
+                return false;
+            destination[1] = VectorSpec.QuantizeFlat(installments / 12.0);
+
+            if (!TryReadString(json, "\"requested_at\""u8, ref cursor, out ReadOnlySpan<byte> requestedAt))
+                return false;
+            long requestedMinute = ParseEpochMinute(requestedAt);
+            destination[3] = VectorSpec.QuantizeFlat(Parse2(requestedAt, 11) / 23.0);
+            destination[4] = VectorSpec.QuantizeFlat(DayOfWeekMondayZero(requestedAt) / 6.0);
+
+            if (!TryReadDouble(json, "\"avg_amount\""u8, ref cursor, out double customerAvgAmount))
+                return false;
+
+            if (!TryReadInt(json, "\"tx_count_24h\""u8, ref cursor, out int txCount24h))
+                return false;
+            destination[8] = VectorSpec.QuantizeFlat(txCount24h / 20.0);
+
+            if (!TryReadKnownMerchants(json, ref cursor, knownHashes, out knownCount))
+                return false;
+
+            if (!TryReadString(json, "\"id\""u8, ref cursor, out ReadOnlySpan<byte> merchantId))
+                return false;
+            ulong merchantHash = Hash(merchantId);
+
+            if (!TryReadString(json, "\"mcc\""u8, ref cursor, out ReadOnlySpan<byte> mcc))
+                return false;
+            destination[12] = VectorSpec.QuantizeFlat(MccRisk(mcc));
+
+            if (!TryReadDouble(json, "\"avg_amount\""u8, ref cursor, out double merchantAvgAmount))
+                return false;
+            destination[13] = VectorSpec.QuantizeFlat(merchantAvgAmount / 10_000.0);
+
+            if (!TryReadBool(json, "\"is_online\""u8, ref cursor, out bool isOnline))
+                return false;
+            destination[9] = isOnline ? (short)VectorSpec.FlatScale : (short)0;
+
+            if (!TryReadBool(json, "\"card_present\""u8, ref cursor, out bool cardPresent))
+                return false;
+            destination[10] = cardPresent ? (short)VectorSpec.FlatScale : (short)0;
+
+            if (!TryReadDouble(json, "\"km_from_home\""u8, ref cursor, out double kmFromHome))
+                return false;
+            destination[7] = VectorSpec.QuantizeFlat(kmFromHome / 1_000.0);
+
+            if (!TryFindValue(json, "\"last_transaction\""u8, ref cursor, out int lastValue))
+                return false;
+
+            if (lastValue < json.Length && json[lastValue] == (byte)'n')
+            {
+                destination[5] = (short)-VectorSpec.FlatScale;
+                destination[6] = (short)-VectorSpec.FlatScale;
+            }
+            else
+            {
+                cursor = lastValue;
+                if (!TryReadString(json, "\"timestamp\""u8, ref cursor, out ReadOnlySpan<byte> lastTimestamp))
+                    return false;
+                if (!TryReadDouble(json, "\"km_from_current\""u8, ref cursor, out double lastKm))
+                    return false;
+
+                long lastMinute = ParseEpochMinute(lastTimestamp);
+                destination[5] = VectorSpec.QuantizeFlat(Math.Max(0, requestedMinute - lastMinute) / 1_440.0);
+                destination[6] = VectorSpec.QuantizeFlat(lastKm / 1_000.0);
+            }
+
+            destination[2] = customerAvgAmount > 0
+                ? VectorSpec.QuantizeFlat((amount / customerAvgAmount) / 10.0)
+                : (short)VectorSpec.FlatScale;
+
+            bool knownMerchant = false;
+            for (int i = 0; i < knownCount; i++)
+            {
+                if (knownHashes[i] == merchantHash)
+                {
+                    knownMerchant = true;
+                    break;
+                }
+            }
+
+            destination[11] = knownMerchant ? (short)0 : (short)VectorSpec.FlatScale;
+            return true;
+        }
+        catch
+        {
+            destination.Clear();
+            return false;
+        }
+    }
+
+    private static bool TryReadDouble(ReadOnlySpan<byte> json, ReadOnlySpan<byte> name, ref int cursor, out double value)
+    {
+        value = 0;
+        if (!TryFindValue(json, name, ref cursor, out int valueStart))
+            return false;
+
+        if (!Utf8Parser.TryParse(json[valueStart..], out value, out int consumed) || consumed <= 0)
+            return false;
+
+        cursor = valueStart + consumed;
+        return true;
+    }
+
+    private static bool TryReadInt(ReadOnlySpan<byte> json, ReadOnlySpan<byte> name, ref int cursor, out int value)
+    {
+        value = 0;
+        if (!TryFindValue(json, name, ref cursor, out int valueStart))
+            return false;
+
+        if (!Utf8Parser.TryParse(json[valueStart..], out value, out int consumed) || consumed <= 0)
+            return false;
+
+        cursor = valueStart + consumed;
+        return true;
+    }
+
+    private static bool TryReadBool(ReadOnlySpan<byte> json, ReadOnlySpan<byte> name, ref int cursor, out bool value)
+    {
+        value = false;
+        if (!TryFindValue(json, name, ref cursor, out int valueStart))
+            return false;
+
+        if (json[valueStart..].StartsWith("true"u8))
+        {
+            value = true;
+            cursor = valueStart + 4;
+            return true;
+        }
+
+        if (json[valueStart..].StartsWith("false"u8))
+        {
+            cursor = valueStart + 5;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryReadString(ReadOnlySpan<byte> json, ReadOnlySpan<byte> name, ref int cursor, out ReadOnlySpan<byte> value)
+    {
+        value = default;
+        if (!TryFindValue(json, name, ref cursor, out int valueStart))
+            return false;
+
+        if ((uint)valueStart >= (uint)json.Length || json[valueStart] != (byte)'"')
+            return false;
+
+        int contentStart = valueStart + 1;
+        int relativeEnd = json[contentStart..].IndexOf((byte)'"');
+        if (relativeEnd < 0)
+            return false;
+
+        value = json.Slice(contentStart, relativeEnd);
+        cursor = contentStart + relativeEnd + 1;
+        return true;
+    }
+
+    private static bool TryReadKnownMerchants(ReadOnlySpan<byte> json, ref int cursor, Span<ulong> hashes, out int count)
+    {
+        count = 0;
+        if (!TryFindValue(json, "\"known_merchants\""u8, ref cursor, out int valueStart))
+            return false;
+
+        if ((uint)valueStart >= (uint)json.Length || json[valueStart] != (byte)'[')
+            return false;
+
+        int end = json[valueStart..].IndexOf((byte)']');
+        if (end < 0)
+            return false;
+
+        int i = valueStart + 1;
+        int arrayEnd = valueStart + end;
+        while (i < arrayEnd)
+        {
+            while (i < arrayEnd && json[i] != (byte)'"')
+                i++;
+            if (i >= arrayEnd)
+                break;
+
+            int contentStart = i + 1;
+            int relativeEnd = json[contentStart..arrayEnd].IndexOf((byte)'"');
+            if (relativeEnd < 0)
+                return false;
+
+            if (count < hashes.Length)
+                hashes[count++] = Hash(json.Slice(contentStart, relativeEnd));
+            i = contentStart + relativeEnd + 1;
+        }
+
+        cursor = arrayEnd + 1;
+        return true;
+    }
+
+    private static bool TryFindValue(ReadOnlySpan<byte> json, ReadOnlySpan<byte> name, ref int cursor, out int valueStart)
+    {
+        valueStart = 0;
+        if ((uint)cursor >= (uint)json.Length)
+            return false;
+
+        int relativeName = json[cursor..].IndexOf(name);
+        if (relativeName < 0)
+            return false;
+
+        int afterName = cursor + relativeName + name.Length;
+        int relativeColon = json[afterName..].IndexOf((byte)':');
+        if (relativeColon < 0)
+            return false;
+
+        valueStart = afterName + relativeColon + 1;
+        while (valueStart < json.Length && IsJsonWhitespace(json[valueStart]))
+            valueStart++;
+
+        cursor = valueStart;
+        return valueStart < json.Length;
+    }
+
+    private static bool IsJsonWhitespace(byte value)
+    {
+        return value is (byte)' ' or (byte)'\n' or (byte)'\r' or (byte)'\t';
     }
 
     private static Context RootContext(ReadOnlySpan<byte> name)

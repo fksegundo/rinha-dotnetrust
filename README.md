@@ -31,7 +31,7 @@ Estrutura:
 
 Imagens publicadas:
 
-- `filonsegundo/rinha-dotnetrust-api:submissionv2`
+- `filonsegundo/rinha-dotnetrust-api:v0.3`
 - `filonsegundo/rinha-dotnetrust-lb:submission`
 
 ## EN
@@ -65,7 +65,7 @@ Layout:
 
 Published images:
 
-- `filonsegundo/rinha-dotnetrust-api:submissionv2`
+- `filonsegundo/rinha-dotnetrust-api:v0.3`
 - `filonsegundo/rinha-dotnetrust-lb:submission`
 
 ## Quick Start

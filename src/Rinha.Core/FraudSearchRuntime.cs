@@ -14,18 +14,19 @@ public static class FraudSearchRuntime
             ? configuredMaxCandidates
             : VectorSpec.DefaultMaxCandidatesPerCenter;
 
-        var fallback = new DotNetFraudSearch(FraudIndex.Load(annIndexPath, probes, maxCandidates));
-
-        if (!backend.Equals("rust", StringComparison.OrdinalIgnoreCase))
-            return fallback;
-
-        try
+        if (backend.Equals("rust", StringComparison.OrdinalIgnoreCase))
         {
-            return NativeFraudSearch.Open(nativeIndexPath);
+            try
+            {
+                return NativeFraudSearch.Open(nativeIndexPath);
+            }
+            catch
+            {
+                // Keep the .NET index as a fallback for local/debug runs where the
+                // native artifact is missing, but avoid loading it on the hot path.
+            }
         }
-        catch
-        {
-            return fallback;
-        }
+
+        return new DotNetFraudSearch(FraudIndex.Load(annIndexPath, probes, maxCandidates));
     }
 }
