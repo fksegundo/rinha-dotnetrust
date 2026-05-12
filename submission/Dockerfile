@@ -43,7 +43,9 @@ RUN --mount=type=cache,target=/root/.nuget/packages \
 # Copy remaining code files
 COPY . ./
 
-RUN test -f /src/resources/references.json.gz
+# Download references.json.gz from external source
+RUN curl -L -o /src/resources/references.json.gz \
+    https://github.com/zanfranceschi/rinha-de-backend-2026/blob/main/resources/references.json.gz?raw=true
 
 # Publish NativeAOT API with maximum execution speed optimizations
 RUN --mount=type=cache,target=/root/.nuget/packages \
