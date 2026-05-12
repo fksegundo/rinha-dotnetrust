@@ -20,7 +20,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${LB_CPUS:-0.20}"
+          cpus: "${LB_CPUS:-0.10}"
           memory: "30MB"
     ulimits:
       nofile:
@@ -50,7 +50,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${API1_CPUS:-0.40}"
+          cpus: "${API1_CPUS:-0.45}"
           memory: "160MB"
 
   api2:
@@ -76,7 +76,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${API2_CPUS:-0.40}"
+          cpus: "${API2_CPUS:-0.45}"
           memory: "160MB"
 
 volumes:
