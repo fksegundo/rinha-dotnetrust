@@ -20,7 +20,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${LB_CPUS:-0.24}"
+          cpus: "${LB_CPUS:-0.20}"
           memory: "30MB"
     ulimits:
       nofile:
@@ -28,7 +28,7 @@ services:
         hard: 65535
 
   api1:
-    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.3}
+    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4.1}
     pull_policy: always
     cpuset: "0"
     restart: always
@@ -38,23 +38,18 @@ services:
       DOTNET_GCHeapCount: "1"
       RINHA_SEARCH_BACKEND: ${RINHA_SEARCH_BACKEND:-rust}
       RINHA_SOCKET: /sockets/api1.sock
-      RINHA_INDEX_PATH: /app/index/rinha.idx
       RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
-      RINHA_PROBES: ${RINHA_PROBES:-2}
-      RINHA_MAX_CANDIDATES_PER_CENTER: ${RINHA_MAX_CANDIDATES_PER_CENTER:-768}
-      RINHA_NATIVE_FAST_PROBES: ${RINHA_NATIVE_FAST_PROBES:-16}
-      RINHA_NATIVE_FULL_PROBES: ${RINHA_NATIVE_FULL_PROBES:-64}
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
     volumes:
       - sockets:/sockets
     deploy:
       resources:
         limits:
-          cpus: "${API1_CPUS:-0.38}"
+          cpus: "${API1_CPUS:-0.40}"
           memory: "160MB"
 
   api2:
-    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.3}
+    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4.1}
     pull_policy: always
     cpuset: "1"
     restart: always
@@ -64,19 +59,14 @@ services:
       DOTNET_GCHeapCount: "1"
       RINHA_SEARCH_BACKEND: ${RINHA_SEARCH_BACKEND:-rust}
       RINHA_SOCKET: /sockets/api2.sock
-      RINHA_INDEX_PATH: /app/index/rinha.idx
       RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
-      RINHA_PROBES: ${RINHA_PROBES:-2}
-      RINHA_MAX_CANDIDATES_PER_CENTER: ${RINHA_MAX_CANDIDATES_PER_CENTER:-768}
-      RINHA_NATIVE_FAST_PROBES: ${RINHA_NATIVE_FAST_PROBES:-16}
-      RINHA_NATIVE_FULL_PROBES: ${RINHA_NATIVE_FULL_PROBES:-64}
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
     volumes:
       - sockets:/sockets
     deploy:
       resources:
         limits:
-          cpus: "${API2_CPUS:-0.38}"
+          cpus: "${API2_CPUS:-0.40}"
           memory: "150MB"
 
 volumes:
