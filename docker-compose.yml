@@ -1,6 +1,6 @@
 services:
   lb:
-    image: ${LB_IMAGE:-filonsegundo/rinha-dotnetrust-lb:submission}
+    image: ${LB_IMAGE:-ghcr.io/fksegundo/rinha-api-lb:latest}
     pull_policy: always
     cpuset: "2,3"
     security_opt:
@@ -28,7 +28,7 @@ services:
         hard: 65535
 
   api1:
-    image: ${APP_IMAGE:-ghcr.io/fksegundo/rinha-api:latest}
+    image: ${APP_IMAGE:-ghcr.io/fksegundo/rinha-api:sha-7f58d6f}
     pull_policy: always
     cpuset: "0"
     restart: always
@@ -51,7 +51,7 @@ services:
           memory: "160MB"
 
   api2:
-    image: ${APP_IMAGE:-ghcr.io/fksegundo/rinha-api:latest}
+    image: ${APP_IMAGE:-ghcr.io/fksegundo/rinha-api:sha-7f58d6f}
     pull_policy: always
     cpuset: "1"
     restart: always
