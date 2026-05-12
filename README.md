@@ -2,104 +2,98 @@
 
 ## PT-BR
 
-Repositorio principal da solucao `rinha-dotnetrust` para a Rinha de Backend 2026.
+Repositório principal da solução `rinha-dotnetrust` para a Rinha de Backend 2026.
 
-Stack:
+Esta versão está extremamente limpa e reestruturada, contendo **apenas o caminho feliz de máxima performance**, sem restos de códigos e scripts experimentais de desenvolvimento.
 
-- API em C# / .NET 10 NativeAOT
-- busca nativa em Rust via P/Invoke
-- indice `RNATIDX2` exato com pruning por bounding box e scan AVX2 em blocos de 8 vetores
-- load balancer proprio em repositorio separado
-- pre-processamento offline do dataset oficial para gerar os indices dentro da imagem
+### Stack:
 
-Melhor validacao local usando as imagens publicadas:
+- **API**: C# / .NET 10 NativeAOT (Kestrel escutando via sockets Unix)
+- **Motor de Busca**: Busca nativa exata escrita em Rust via P/Invoke (`librinha_native.so`)
+- **Algoritmo de Busca**: Índice de árvore espacial exato (`RNATIDX2`) com pruning agressivo por bounding box e varreduras vetorizadas via AVX2 em blocos de 8 pistas (8-lane block scans)
+- **Load Balancer**: Load Balancer próprio e leve de alta vazão (hospedado em repositório separado)
+- **Pré-processamento**: Conversor do dataset oficial diretamente em estrutura binária compacta de árvore durante a montagem do container
 
-- score: `5959.38`
-- p99: `1.10ms`
-- false positives: `0`
-- false negatives: `0`
-- http errors: `0`
+### Validação Local Recente:
 
-Estrutura:
+- **Score**: `5959.38`
+- **p99**: `1.10ms`
+- **False Positives**: `0`
+- **False Negatives**: `0`
+- **Erros HTTP**: `0`
 
-- `src/`: API e core
-- `native/rinha-native/`: motor nativo em Rust
-- `tools/`: preprocessamento e verificacao
-- `submission/`: Dockerfile da API e compose de validacao local
-- `bench/`: scripts locais
-- `Makefile`: atalhos para build, publish e benchmark
+### Estrutura do Repositório:
 
-Imagens publicadas:
+- `src/`: Lógica da API Web e Core.
+- `native/rinha-native/`: Motor nativo em Rust que implementa a busca kNN vetorial exata.
+- `tools/Rinha.Preprocess/`: Pré-processador escrito em C# para indexar o dataset oficial `references.json.gz`.
+- `submission/`: `Dockerfile` de produção altamente otimizado e `docker-compose.yml` para validação e testes locais.
 
-- `filonsegundo/rinha-dotnetrust-api:v0.3`
+### Imagens Publicadas:
+
+- `filonsegundo/rinha-dotnetrust-api:v0.4.1`
 - `filonsegundo/rinha-dotnetrust-lb:submission`
+
+---
 
 ## EN
 
 Main repository for the `rinha-dotnetrust` solution targeting Rinha de Backend 2026.
 
-Stack:
+This version is extremely clean and restructured, retaining **only the high-performance happy path** and removing all experimental legacy code, benchmarks, and scripts.
 
-- C# / .NET 10 NativeAOT API
-- native Rust search via P/Invoke
-- exact `RNATIDX2` index with bounding-box pruning and AVX2 8-lane block scans
-- standalone load balancer hosted in a separate repository
-- offline preprocessing of the official dataset to generate the runtime indexes
+### Stack:
 
-Best local validation using the published images:
+- **API**: C# / .NET 10 NativeAOT (Kestrel listening via Unix sockets)
+- **Search Engine**: High-performance native exact search written in Rust, loaded via P/Invoke (`librinha_native.so`)
+- **Search Algorithm**: Exact spatial tree index (`RNATIDX2`) with aggressive bounding-box pruning and AVX2-accelerated 8-lane block vector scans
+- **Load Balancer**: Custom, lightweight, high-throughput load balancer (hosted in a separate repository)
+- **Preprocessing**: Fast compilation-time conversion of the official dataset directly into a compact binary tree index file
 
-- score: `5959.38`
-- p99: `1.10ms`
-- false positives: `0`
-- false negatives: `0`
-- http errors: `0`
+### Layout:
 
-Layout:
+- `src/`: C# Web API and core logic.
+- `native/rinha-native/`: High-performance native search engine written in Rust.
+- `tools/Rinha.Preprocess/`: C# preprocessing tool to index `references.json.gz`.
+- `submission/`: Optimized production `Dockerfile` and local testing `docker-compose.yml`.
 
-- `src/`: API and core logic
-- `native/rinha-native/`: native Rust engine
-- `tools/`: preprocessing and verification tools
-- `submission/`: API Dockerfile and local validation compose
-- `bench/`: local scripts
-- `Makefile`: shortcuts for build, publish and benchmark flows
+### Published Images:
 
-Published images:
-
-- `filonsegundo/rinha-dotnetrust-api:v0.3`
+- `filonsegundo/rinha-dotnetrust-api:v0.4.1`
 - `filonsegundo/rinha-dotnetrust-lb:submission`
 
-## Quick Start
+---
 
-Build the solution:
+## Quick Start / Como Executar
 
-```bash
-make build
-```
+### 🛠️ Compilando Localmente para Desenvolvimento
 
-Publish the API image:
+1. **Compilar a biblioteca nativa Rust**:
+   ```bash
+   cd native/rinha-native
+   cargo build --release
+   ```
 
-```bash
-make publish-api
-```
+2. **Compilar e rodar a solução .NET**:
+   ```bash
+   dotnet build
+   ```
 
-Start the published stack locally:
+### 🐳 Construindo e Executando a Stack com Docker
 
-```bash
-make compose-up
-curl http://localhost:9999/ready
-```
+O `Dockerfile` é totalmente otimizado com cache multi-camadas (BuildKit) para compilar o Rust e o .NET rapidamente. No processo de montagem, ele executa o pré-processamento do dataset `resources/references.json.gz` e gera o índice `native.idx`.
 
-Run smoke and full benchmark:
+1. **Construir a imagem local otimizada**:
+   ```bash
+   docker build -f submission/Dockerfile -t filonsegundo/rinha-dotnetrust-api:v0.4.1 .
+   ```
 
-```bash
-make smoke
-make bench
-```
+2. **Subir os serviços (Load Balancer + 2 instâncias da API)**:
+   ```bash
+   docker compose -f submission/docker-compose.yml up -d
+   ```
 
-Benchmark notes:
-
-- `make smoke` and `make bench` now use the published images and run k6 in Docker.
-- `make smoke-build` and `make bench-build` keep the old local rebuild flow.
-- `make bench-diagnostic` adds the diagnostic compose overlay so you can vary CPU split, probes, and cpuset without editing the submission compose.
-- `make bench-matrix` runs the versioned scenario table in `bench/diagnostic-matrix.tsv` and writes a `summary.tsv` plus one artifact directory per scenario.
-- Benchmark artifacts and runtime evidence are written under `artifacts/`.
+3. **Verificar a disponibilidade das APIs**:
+   ```bash
+   curl http://localhost:9999/ready
+   ```
