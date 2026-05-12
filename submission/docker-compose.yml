@@ -28,7 +28,7 @@ services:
       - seccomp:unconfined
 
   api1:
-    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.3}
+    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4}
     pull_policy: always
     restart: always
     user: "0:0"
@@ -45,7 +45,7 @@ services:
           memory: "155MB"
 
   api2:
-    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.3}
+    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4}
     pull_policy: always
     restart: always
     user: "0:0"
