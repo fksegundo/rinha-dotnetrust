@@ -11,7 +11,6 @@ services:
     environment:
       UPSTREAMS: /sockets/api1.sock,/sockets/api2.sock
       PORT: "9999"
-      BUF_SIZE: ${LB_BUF_SIZE:-4096}
       WORKERS: ${LB_WORKERS:-1}
     ports:
       - "9999:9999"
@@ -33,6 +32,8 @@ services:
     cpuset: "0"
     restart: always
     user: "0:0"
+    security_opt:
+      - seccomp=unconfined
     environment:
       DOTNET_PROCESSOR_COUNT: "1"
       DOTNET_GCHeapCount: "1"
@@ -56,6 +57,8 @@ services:
     cpuset: "1"
     restart: always
     user: "0:0"
+    security_opt:
+      - seccomp=unconfined
     environment:
       DOTNET_PROCESSOR_COUNT: "1"
       DOTNET_GCHeapCount: "1"
