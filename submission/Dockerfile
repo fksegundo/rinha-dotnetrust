@@ -29,12 +29,6 @@ RUN dotnet publish src/Rinha.Api/Rinha.Api.csproj \
 RUN dotnet run --project tools/Rinha.Preprocess/Rinha.Preprocess.csproj \
     -c Release -- \
     /src/resources/references.json.gz \
-    /out/index/rinha.idx \
-    512 30000 5
-
-RUN dotnet run --project tools/Rinha.Preprocess/Rinha.Preprocess.csproj \
-    -c Release -- \
-    /src/resources/references.json.gz \
     /out/index/native.idx \
     native ${RINHA_NATIVE_LEAF_SIZE}
 

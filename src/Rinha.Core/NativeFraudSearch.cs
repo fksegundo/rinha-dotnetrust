@@ -22,7 +22,7 @@ public sealed partial class NativeFraudSearch : IFraudSearch, IDisposable
     public int PredictFraudCount(ReadOnlySpan<byte> payload)
     {
         Span<short> flatQuery = stackalloc short[VectorSpec.PackedDimensions];
-        if (!FraudVectorizer.TryVectorizeFlat(payload, flatQuery))
+        if (!FraudVectorizer.TryVectorize(payload, flatQuery))
             return 0;
 
         if (FlatFraudCountCorrections.TryGetCorrectedCount(flatQuery, out int correctedCount))
