@@ -9,7 +9,7 @@ internal static class NativeIndexWriter
     {
         leafSize = Math.Clamp(leafSize, 32, 2048);
 
-        var partitions = new List<int>[64];
+        var partitions = new List<int>[256];
         for (int i = 0; i < partitions.Length; i++)
             partitions[i] = [];
 
@@ -146,10 +146,10 @@ internal static class NativeIndexWriter
     private static int PartitionKey(ReadOnlySpan<short> vector)
     {
         int key = 0;
-        if (vector[5] >= 0) key |= 1 << 0;
-        if (vector[9] > 0) key |= 1 << 1;
-        if (vector[10] > 0) key |= 1 << 2;
-        if (vector[11] > 0) key |= 1 << 3;
+        if (vector[5] >= 0) key |= 1 << 0;  // has_last_tx
+        if (vector[9] > 0)  key |= 1 << 1;  // is_online
+        if (vector[10] > 0) key |= 1 << 2;  // card_present
+        if (vector[11] > 0) key |= 1 << 3;  // unknown_merchant
         int mccBucket = vector[12] switch
         {
             < 2048 => 0,
@@ -158,6 +158,8 @@ internal static class NativeIndexWriter
             _ => 3
         };
         key |= mccBucket << 4;
+        if (vector[2] > 4096) key |= 1 << 6; // amount > 5x customer avg (suspicious ratio)
+        if (vector[8] > 2048) key |= 1 << 7; // tx_count_24h > 5 (high frequency)
         return key;
     }
 

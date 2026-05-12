@@ -28,7 +28,7 @@ services:
         hard: 65535
 
   api1:
-    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4.1}
+    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4.4}
     pull_policy: always
     cpuset: "0"
     restart: always
@@ -40,6 +40,8 @@ services:
       RINHA_SOCKET: /sockets/api1.sock
       RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+      DOTNET_GCConserveMemory: "9"
+      DOTNET_GCHeapHardLimit: "134217728"
     volumes:
       - sockets:/sockets
     deploy:
@@ -49,7 +51,7 @@ services:
           memory: "160MB"
 
   api2:
-    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4.1}
+    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4.4}
     pull_policy: always
     cpuset: "1"
     restart: always
@@ -61,6 +63,8 @@ services:
       RINHA_SOCKET: /sockets/api2.sock
       RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
+      DOTNET_GCConserveMemory: "9"
+      DOTNET_GCHeapHardLimit: "125829120"
     volumes:
       - sockets:/sockets
     deploy:

@@ -3,12 +3,15 @@ use std::fs;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
 
+#[cfg(target_os = "linux")]
+extern crate libc;
+
 const MAGIC_TREE: &[u8; 8] = b"RNATIDX2";
 const PACKED_DIMS: usize = 16;
 const DIMS: usize = 14;
 const LANES: usize = 8;
 const K: usize = 5; // kNN
-const MAX_PARTITIONS: usize = 64;
+const MAX_PARTITIONS: usize = 256;
 const TREE_STACK_CAPACITY: usize = 128;
 
 // ─── Native Index (Tree / RNATIDX2) ──────────────────────────────────────────
@@ -114,13 +117,9 @@ impl NativeIndex {
             partition_count, node_count, total_blocks, has_avx2
         );
 
-        Ok(Self {
-            partitions,
-            nodes,
-            vectors,
-            labels,
-            has_avx2,
-        })
+        let index = Self { partitions, nodes, vectors, labels, has_avx2 };
+        index.advise_hugepages();
+        Ok(index)
     }
 
     fn predict(&self, query: &[i16; PACKED_DIMS]) -> i32 {
@@ -268,6 +267,19 @@ impl NativeIndex {
             }
         }
     }
+
+    fn advise_hugepages(&self) {
+        #[cfg(target_os = "linux")]
+        unsafe {
+            let vptr = self.vectors.as_ptr() as *mut libc::c_void;
+            let vlen = self.vectors.len() * std::mem::size_of::<i16>();
+            libc::madvise(vptr, vlen, libc::MADV_HUGEPAGE);
+
+            let lptr = self.labels.as_ptr() as *mut libc::c_void;
+            let llen = self.labels.len();
+            libc::madvise(lptr, llen, libc::MADV_HUGEPAGE);
+        }
+    }
 }
 
 // ─── FFI Exports ─────────────────────────────────────────────────────────────
@@ -402,6 +414,58 @@ fn read_i16_array(bytes: &[u8], cursor: &mut usize) -> Result<[i16; PACKED_DIMS]
 
 #[inline(always)]
 fn lower_bound_box(
+    query: &[i16; PACKED_DIMS],
+    min: &[i16; PACKED_DIMS],
+    max: &[i16; PACKED_DIMS],
+) -> i64 {
+    #[cfg(target_arch = "x86_64")]
+    if std::arch::is_x86_feature_detected!("avx2") {
+        return unsafe { lower_bound_box_avx2(query, min, max) };
+    }
+    lower_bound_box_scalar(query, min, max)
+}
+
+// Processa todas as 16 dimensões (14 reais + 2 padding=0) em 1 passada AVX2.
+// Usa saturating subtract para clamp-to-zero + madd para quadrado e redução por pares.
+// Diferença máx por dim: 8192-(-8192)=16384 → cabe em i16; soma de 2 quadrados ≤ 536M < i32::MAX.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2")]
+unsafe fn lower_bound_box_avx2(
+    query: &[i16; PACKED_DIMS],
+    min: &[i16; PACKED_DIMS],
+    max: &[i16; PACKED_DIMS],
+) -> i64 {
+    use std::arch::x86_64::*;
+
+    // SAFETY: guarded by #[target_feature(enable = "avx2")] e verificação em runtime no chamador
+    unsafe {
+        let q  = _mm256_loadu_si256(query.as_ptr() as *const __m256i);
+        let mn = _mm256_loadu_si256(min.as_ptr()   as *const __m256i);
+        let mx = _mm256_loadu_si256(max.as_ptr()   as *const __m256i);
+
+        let zero = _mm256_setzero_si256();
+        // distância para baixo do box: max(0, min - query)
+        let below = _mm256_max_epi16(_mm256_sub_epi16(mn, q), zero);
+        // distância para cima do box: max(0, query - max)
+        let above = _mm256_max_epi16(_mm256_sub_epi16(q, mx), zero);
+        // Por dimensão, só um dos lados é não-zero
+        let diff = _mm256_max_epi16(below, above);
+
+        // madd: diff[i]²+diff[i+1]² → 8 valores i32 (soma por pares)
+        let sq = _mm256_madd_epi16(diff, diff);
+
+        // Redução horizontal: 8 → 4 → 2 → 1 i32
+        let lo = _mm256_castsi256_si128(sq);
+        let hi = _mm256_extracti128_si256(sq, 1);
+        let s4 = _mm_add_epi32(lo, hi);
+        let s2 = _mm_hadd_epi32(s4, s4);
+        let s1 = _mm_hadd_epi32(s2, s2);
+        _mm_cvtsi128_si32(s1) as i64
+    }
+}
+
+#[inline(always)]
+fn lower_bound_box_scalar(
     query: &[i16; PACKED_DIMS],
     min: &[i16; PACKED_DIMS],
     max: &[i16; PACKED_DIMS],
