@@ -2,7 +2,6 @@ services:
   lb:
     image: ${LB_IMAGE:-filonsegundo/rinha-dotnetrust-lb:submission}
     pull_policy: always
-    cpuset: "2,3"
     security_opt:
       - seccomp=unconfined
     depends_on:
