@@ -2,7 +2,9 @@ services:
   lb:
     image: ${LB_IMAGE:-filonsegundo/rinha-dotnetrust-lb:submission}
     pull_policy: always
-    restart: always
+    cpuset: "2,3"
+    security_opt:
+      - seccomp=unconfined
     depends_on:
       - api1
       - api2
@@ -18,21 +20,23 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${LB_CPUS:-0.10}"
+          cpus: "${LB_CPUS:-0.20}"
           memory: "30MB"
     ulimits:
       nofile:
         soft: 65535
         hard: 65535
-    security_opt:
-      - seccomp:unconfined
 
   api1:
-    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4}
+    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4.1}
     pull_policy: always
+    cpuset: "0"
     restart: always
     user: "0:0"
     environment:
+      DOTNET_PROCESSOR_COUNT: "1"
+      DOTNET_GCHeapCount: "1"
+      RINHA_SEARCH_BACKEND: ${RINHA_SEARCH_BACKEND:-rust}
       RINHA_SOCKET: /sockets/api1.sock
       RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
@@ -41,15 +45,19 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${API1_CPUS:-0.45}"
-          memory: "155MB"
+          cpus: "${API1_CPUS:-0.40}"
+          memory: "160MB"
 
   api2:
-    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4}
+    image: ${APP_IMAGE:-filonsegundo/rinha-dotnetrust-api:v0.4.1}
     pull_policy: always
+    cpuset: "1"
     restart: always
     user: "0:0"
     environment:
+      DOTNET_PROCESSOR_COUNT: "1"
+      DOTNET_GCHeapCount: "1"
+      RINHA_SEARCH_BACKEND: ${RINHA_SEARCH_BACKEND:-rust}
       RINHA_SOCKET: /sockets/api2.sock
       RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
@@ -58,8 +66,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${API2_CPUS:-0.45}"
-          memory: "155MB"
+          cpus: "${API2_CPUS:-0.40}"
+          memory: "150MB"
 
 volumes:
   sockets:
