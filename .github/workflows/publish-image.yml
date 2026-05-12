@@ -18,6 +18,10 @@ on:
         description: 'Custom image tag (optional)'
         required: false
         default: ''
+      rinha_native_leaf_size:
+        description: 'RINHA_NATIVE_LEAF_SIZE build arg'
+        required: false
+        default: '192'
 
 concurrency:
   group: publish-image-${{ github.ref }}
@@ -63,6 +67,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            RINHA_NATIVE_LEAF_SIZE=${{ github.event.inputs.rinha_native_leaf_size || '192' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
