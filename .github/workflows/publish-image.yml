@@ -13,6 +13,11 @@ on:
       - 'resources/**'
       - 'Rinha.slnx'
   workflow_dispatch:
+    inputs:
+      custom_tag:
+        description: 'Custom image tag (optional)'
+        required: false
+        default: ''
 
 concurrency:
   group: publish-image-${{ github.ref }}
@@ -47,6 +52,7 @@ jobs:
             type=ref,event=branch
             type=ref,event=tag
             type=sha,format=short
+            type=raw,value=${{ github.event.inputs.custom_tag }},enable=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.custom_tag != '' }}
 
       - name: Build and push (linux/amd64)
         uses: docker/build-push-action@v6
