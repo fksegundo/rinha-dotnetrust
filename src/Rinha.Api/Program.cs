@@ -33,31 +33,59 @@ builder.Services.AddSingleton<IFraudSearch>(_ => FraudSearchRuntime.CreateFromEn
 var app = builder.Build();
 Warmup(app.Services.GetRequiredService<IFraudSearch>());
 
-app.MapGet("/ready", static async (HttpContext context) =>
+app.MapGet("/ready", static (HttpContext context) =>
 {
     ReadOnlyMemory<byte> response = Responses.Ready;
     context.Response.StatusCode = StatusCodes.Status200OK;
     context.Response.ContentType = "text/plain";
     context.Response.ContentLength = response.Length;
-    await context.Response.Body.WriteAsync(response, context.RequestAborted);
+    context.Response.BodyWriter.Write(response.Span);
+    return Task.CompletedTask;
 });
 
 app.MapPost("/fraud-score", static async (HttpContext context, IFraudSearch fraudSearch) =>
 {
+    byte[]? rented = null;
     try
     {
         int length = (int)(context.Request.ContentLength ?? 0);
-        System.IO.Pipelines.ReadResult result;
-        while (true)
+        ReadOnlySequence<byte> buffer;
+
+        // Try synchronous read first (TechEmpower fast-path)
+        if (context.Request.BodyReader.TryRead(out var result) && result.Buffer.Length >= length)
         {
-            result = await context.Request.BodyReader.ReadAsync(context.RequestAborted);
-            if (result.IsCompleted || result.Buffer.Length >= length)
-                break;
-            context.Request.BodyReader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+            buffer = result.Buffer;
+        }
+        else
+        {
+            if (result.Buffer.Length > 0)
+            {
+                context.Request.BodyReader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+            }
+
+            while (true)
+            {
+                result = await context.Request.BodyReader.ReadAsync(context.RequestAborted);
+                if (result.IsCompleted || result.Buffer.Length >= length)
+                    break;
+                context.Request.BodyReader.AdvanceTo(result.Buffer.Start, result.Buffer.End);
+            }
+            buffer = result.Buffer;
         }
 
-        var buffer = result.Buffer;
-        ReadOnlySpan<byte> span = buffer.IsSingleSegment ? buffer.FirstSpan : buffer.ToArray();
+        ReadOnlySpan<byte> span;
+        if (buffer.IsSingleSegment)
+        {
+            span = buffer.FirstSpan;
+        }
+        else
+        {
+            int bufferLength = (int)buffer.Length;
+            rented = System.Buffers.ArrayPool<byte>.Shared.Rent(bufferLength);
+            buffer.CopyTo(rented);
+            span = rented.AsSpan(0, bufferLength);
+        }
+
         if (length > 0 && span.Length > length)
             span = span.Slice(0, length);
 
@@ -68,7 +96,7 @@ app.MapPost("/fraud-score", static async (HttpContext context, IFraudSearch frau
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/json";
         context.Response.ContentLength = response.Length;
-        await context.Response.Body.WriteAsync(response, context.RequestAborted);
+        context.Response.BodyWriter.Write(response.Span);
     }
     catch
     {
@@ -76,7 +104,12 @@ app.MapPost("/fraud-score", static async (HttpContext context, IFraudSearch frau
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/json";
         context.Response.ContentLength = response.Length;
-        await context.Response.Body.WriteAsync(response, context.RequestAborted);
+        context.Response.BodyWriter.Write(response.Span);
+    }
+    finally
+    {
+        if (rented is not null)
+            System.Buffers.ArrayPool<byte>.Shared.Return(rented);
     }
 });
 
@@ -94,9 +127,10 @@ static void ApplyRuntimeTuning()
 
 static void Warmup(IFraudSearch fraudSearch)
 {
+    // High-iteration warmup to page-in virtual memory pages and hot-path cache
     foreach (ReadOnlyMemory<byte> payload in WarmupPayloads.All)
     {
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < 500; i++)
             _ = fraudSearch.PredictFraudCount(payload.Span);
     }
 }
