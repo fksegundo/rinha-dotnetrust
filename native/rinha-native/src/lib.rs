@@ -126,32 +126,25 @@ impl NativeIndex {
         let mut best_dists = [i64::MAX; K];
         let mut best_labels = [0u8; K];
 
-        let mut partition_bounds = [i64::MAX; MAX_PARTITIONS];
-        let mut partition_ids = [0usize; MAX_PARTITIONS];
+        let mut partition_entries = [(0i64, 0usize); MAX_PARTITIONS];
         let mut partition_len = 0usize;
 
         for (idx, partition) in self.partitions.iter().enumerate() {
             let bound = lower_bound_box(query, &partition.min, &partition.max, self.has_avx2);
-            let mut pos = partition_len;
-            while pos > 0 && bound < partition_bounds[pos - 1] {
-                partition_bounds[pos] = partition_bounds[pos - 1];
-                partition_ids[pos] = partition_ids[pos - 1];
-                pos -= 1;
-            }
-
-            partition_bounds[pos] = bound;
-            partition_ids[pos] = idx;
+            partition_entries[partition_len] = (bound, idx);
             partition_len += 1;
         }
 
+        partition_entries[..partition_len].sort_unstable_by_key(|&(bound, _)| bound);
+
         for i in 0..partition_len {
-            let bound = partition_bounds[i];
+            let (bound, idx) = partition_entries[i];
             if bound >= best_dists[K - 1] {
                 break;
             }
 
             self.search_node_iterative(
-                self.partitions[partition_ids[i]].root,
+                self.partitions[idx].root,
                 bound,
                 query,
                 &mut best_dists,
