@@ -12,6 +12,7 @@ services:
       UPSTREAMS: /sockets/api1.sock,/sockets/api2.sock
       PORT: "9999"
       WORKERS: ${LB_WORKERS:-1}
+      BUF_SIZE: ${LB_BUF_SIZE:-4096}
     ports:
       - "9999:9999"
     volumes:
