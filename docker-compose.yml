@@ -21,7 +21,7 @@ services:
       resources:
         limits:
           cpus: "${LB_CPUS:-0.20}"
-          memory: "30MB"
+          memory: "40MB"
     ulimits:
       nofile:
         soft: 65535
@@ -50,7 +50,7 @@ services:
       resources:
         limits:
           cpus: "${API1_CPUS:-0.40}"
-          memory: "160MB"
+          memory: "155MB"
 
   api2:
     image: ${APP_IMAGE:-ghcr.io/fksegundo/rinha-api:latest}
@@ -75,7 +75,7 @@ services:
       resources:
         limits:
           cpus: "${API2_CPUS:-0.40}"
-          memory: "150MB"
+          memory: "155MB"
 
 volumes:
   sockets:
