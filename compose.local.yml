@@ -1,0 +1,5 @@
+services:
+  api1:
+    pull_policy: never
+  api2:
+    pull_policy: never

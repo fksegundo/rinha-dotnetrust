@@ -1,0 +1,10 @@
+.git
+.github/workflows/*.code-workspace
+bin
+obj
+src/**/bin
+src/**/obj
+tools/**/bin
+tools/**/obj
+native/rinha-native/target
+test

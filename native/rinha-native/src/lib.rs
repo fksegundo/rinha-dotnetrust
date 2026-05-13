@@ -131,7 +131,7 @@ impl NativeIndex {
         let mut partition_len = 0usize;
 
         for (idx, partition) in self.partitions.iter().enumerate() {
-            let bound = lower_bound_box(query, &partition.min, &partition.max);
+            let bound = lower_bound_box(query, &partition.min, &partition.max, self.has_avx2);
             let mut pos = partition_len;
             while pos > 0 && bound < partition_bounds[pos - 1] {
                 partition_bounds[pos] = partition_bounds[pos - 1];
@@ -192,8 +192,8 @@ impl NativeIndex {
                         _mm_prefetch((&self.nodes[r]) as *const _ as *const i8, _MM_HINT_T0);
                     }
 
-                    let lb = lower_bound_box(query, &self.nodes[l].min, &self.nodes[l].max);
-                    let rb = lower_bound_box(query, &self.nodes[r].min, &self.nodes[r].max);
+                    let lb = lower_bound_box(query, &self.nodes[l].min, &self.nodes[l].max, self.has_avx2);
+                    let rb = lower_bound_box(query, &self.nodes[r].min, &self.nodes[r].max, self.has_avx2);
 
                     let (near_idx, near_bound, far_idx, far_bound) = if lb <= rb {
                         (l, lb, r, rb)
@@ -257,7 +257,8 @@ impl NativeIndex {
                 scan_block_scalar(&self.vectors, block_base, query)
             };
             let labels_base = block_idx * LANES;
-            for i in 0..LANES {
+            let lane_count = (node.len - b * LANES).min(LANES);
+            for i in 0..lane_count {
                 insert_best(
                     dists[i],
                     self.labels[labels_base + i],
@@ -308,10 +309,8 @@ pub extern "C" fn rinha_predict(handle: *mut c_void, query_ptr: *const i16, len:
         return -1;
     }
     let index = unsafe { &*(handle as *mut NativeIndex) };
-    let query = unsafe { std::slice::from_raw_parts(query_ptr, PACKED_DIMS) };
-    let mut q = [0i16; PACKED_DIMS];
-    q.copy_from_slice(query);
-    index.predict(&q)
+    let query = unsafe { &*(query_ptr as *const [i16; PACKED_DIMS]) };
+    index.predict(query)
 }
 
 #[unsafe(no_mangle)]
@@ -417,9 +416,10 @@ fn lower_bound_box(
     query: &[i16; PACKED_DIMS],
     min: &[i16; PACKED_DIMS],
     max: &[i16; PACKED_DIMS],
+    has_avx2: bool,
 ) -> i64 {
     #[cfg(target_arch = "x86_64")]
-    if std::arch::is_x86_feature_detected!("avx2") {
+    if has_avx2 {
         return unsafe { lower_bound_box_avx2(query, min, max) };
     }
     lower_bound_box_scalar(query, min, max)
