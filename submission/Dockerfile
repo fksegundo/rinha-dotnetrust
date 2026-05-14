@@ -15,7 +15,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/native/target \
     cargo build --release && \
-    cp /native/target/release/librinha_native.so /librinha_native.so
+    cp /native/target/release/librinha_native.so /librinha_native.so && \
+    cp /native/target/release/rinha-search-service /rinha-search-service
 
 # ─── Stage 2: Build .NET API and Preprocess Index ────────────────────────────
 FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
@@ -64,6 +65,7 @@ RUN --mount=type=cache,target=/root/.nuget/packages \
 
 # Copy the native compiled binary to the published output
 COPY --from=native-build /librinha_native.so /out/
+COPY --from=native-build /rinha-search-service /out/
 
 # Run the preprocessor to generate the KD-Tree native index
 RUN --mount=type=cache,target=/root/.nuget/packages \

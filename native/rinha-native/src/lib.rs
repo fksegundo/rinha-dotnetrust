@@ -36,8 +36,13 @@ struct MmapRegion {
     len: usize,
 }
 
+unsafe impl Send for MmapRegion {}
+unsafe impl Sync for MmapRegion {}
+unsafe impl Send for NativeIndex {}
+unsafe impl Sync for NativeIndex {}
+
 impl MmapRegion {
-    fn open(path: &str) -> Result<Self, String> {
+    pub fn open(path: &str) -> Result<Self, String> {
         let file = File::open(path).map_err(|e| e.to_string())?;
         let len = file.metadata().map_err(|e| e.to_string())?.len() as usize;
         if len == 0 {
@@ -103,7 +108,7 @@ struct Node {
 }
 
 impl NativeIndex {
-    fn open(path: &str) -> Result<Self, String> {
+    pub fn open(path: &str) -> Result<Self, String> {
         let mapping = MmapRegion::open(path)?;
         let bytes = mapping.as_slice();
         if bytes.len() < 8 {
@@ -204,7 +209,7 @@ impl NativeIndex {
         Ok(index)
     }
 
-    fn predict(&self, query: &[i16; PACKED_DIMS]) -> i32 {
+    pub fn predict(&self, query: &[i16; PACKED_DIMS]) -> i32 {
         let mut best_dists = [i64::MAX; K];
         let mut best_labels = [0u8; K];
         let mut leaf_visits = 0usize;

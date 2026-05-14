@@ -1,0 +1,55 @@
+services:
+  search:
+    image: ${APP_IMAGE:-ghcr.io/fksegundo/rinha-api:latest}
+    pull_policy: never
+    cpuset: "0"
+    restart: always
+    user: "0:0"
+    security_opt:
+      - seccomp=unconfined
+    entrypoint: ["/app/rinha-search-service"]
+    environment:
+      RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
+      RINHA_SEARCH_SOCKET: /sockets/search.sock
+      RINHA_MAX_LEAF_VISITS: ${RINHA_MAX_LEAF_VISITS:-0}
+    volumes:
+      - sockets:/sockets
+    deploy:
+      resources:
+        limits:
+          cpus: "${SEARCH_CPUS:-0.25}"
+          memory: "120MB"
+
+  api1:
+    cpuset: "1"
+    depends_on:
+      - search
+    environment:
+      RINHA_SEARCH_BACKEND: service
+      RINHA_SEARCH_SOCKET: /sockets/search.sock
+    deploy:
+      resources:
+        limits:
+          cpus: "${API1_CPUS:-0.30}"
+          memory: "100MB"
+
+  api2:
+    cpuset: "2"
+    depends_on:
+      - search
+    environment:
+      RINHA_SEARCH_BACKEND: service
+      RINHA_SEARCH_SOCKET: /sockets/search.sock
+    deploy:
+      resources:
+        limits:
+          cpus: "${API2_CPUS:-0.30}"
+          memory: "100MB"
+
+  lb:
+    cpuset: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "${LB_CPUS:-0.15}"
+          memory: "40MB"
