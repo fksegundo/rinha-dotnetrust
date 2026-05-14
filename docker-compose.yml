@@ -1,8 +1,29 @@
 services:
+  search:
+    image: ${APP_IMAGE:-ghcr.io/fksegundo/rinha-api:latest}
+    pull_policy: always
+    cpuset: "0"
+    restart: always
+    user: "0:0"
+    security_opt:
+      - seccomp=unconfined
+    entrypoint: ["/app/rinha-search-service"]
+    environment:
+      RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
+      RINHA_SEARCH_SOCKET: /sockets/search.sock
+      RINHA_MAX_LEAF_VISITS: ${RINHA_MAX_LEAF_VISITS:-0}
+    volumes:
+      - sockets:/sockets
+    deploy:
+      resources:
+        limits:
+          cpus: "${SEARCH_CPUS:-0.25}"
+          memory: "120MB"
+
   lb:
     image: ${LB_IMAGE:-ghcr.io/fksegundo/rinha-api-lb:latest}
     pull_policy: always
-    cpuset: "2,3"
+    cpuset: "3"
     user: "0:0"
     security_opt:
       - seccomp=unconfined
@@ -29,17 +50,21 @@ services:
   api1:
     image: ${APP_IMAGE:-ghcr.io/fksegundo/rinha-api:latest}
     pull_policy: always
-    cpuset: "0"
+    cpuset: "1"
     restart: always
     user: "0:0"
     security_opt:
       - seccomp=unconfined
+    depends_on:
+      - search
     environment:
       DOTNET_PROCESSOR_COUNT: "1"
       DOTNET_GCHeapCount: "1"
-      RINHA_SEARCH_BACKEND: ${RINHA_SEARCH_BACKEND:-rust}
+      RINHA_SEARCH_BACKEND: service
+      RINHA_SEARCH_SOCKET: /sockets/search.sock
       RINHA_SOCKET: /sockets/api1.sock
       RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
+      RINHA_MAX_LEAF_VISITS: ${RINHA_MAX_LEAF_VISITS:-0}
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
       DOTNET_GCConserveMemory: "9"
       DOTNET_GCHeapHardLimit: "134217728"
@@ -48,23 +73,27 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${API1_CPUS:-0.43}"
-          memory: "160MB"
+          cpus: "${API1_CPUS:-0.30}"
+          memory: "100MB"
 
   api2:
     image: ${APP_IMAGE:-ghcr.io/fksegundo/rinha-api:latest}
     pull_policy: always
-    cpuset: "1"
+    cpuset: "2"
     restart: always
     user: "0:0"
     security_opt:
       - seccomp=unconfined
+    depends_on:
+      - search
     environment:
       DOTNET_PROCESSOR_COUNT: "1"
       DOTNET_GCHeapCount: "1"
-      RINHA_SEARCH_BACKEND: ${RINHA_SEARCH_BACKEND:-rust}
+      RINHA_SEARCH_BACKEND: service
+      RINHA_SEARCH_SOCKET: /sockets/search.sock
       RINHA_SOCKET: /sockets/api2.sock
       RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
+      RINHA_MAX_LEAF_VISITS: ${RINHA_MAX_LEAF_VISITS:-0}
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
       DOTNET_GCConserveMemory: "9"
       DOTNET_GCHeapHardLimit: "125829120"
@@ -73,8 +102,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${API2_CPUS:-0.43}"
-          memory: "160MB"
+          cpus: "${API2_CPUS:-0.30}"
+          memory: "100MB"
 
 volumes:
   sockets:
