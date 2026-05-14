@@ -1,6 +1,8 @@
 bin/
 obj/
 **/bin/
+!native/rinha-native/src/bin/
+!native/rinha-native/src/bin/**
 **/obj/
 *.idx
 *.log
