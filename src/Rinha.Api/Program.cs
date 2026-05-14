@@ -1,4 +1,7 @@
 using System.Buffers;
+using System.Buffers.Binary;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 using System.Net;
 using System.Net.Sockets;
 using Rinha.Core;
@@ -6,8 +9,15 @@ using Rinha.Core;
 ApplyRuntimeTuning();
 
 string? socketPath = Environment.GetEnvironmentVariable("RINHA_SOCKET");
+string? fdSocketPath = Environment.GetEnvironmentVariable("RINHA_FD_SOCKET");
 var fraudSearch = FraudSearchRuntime.CreateFromEnvironment();
 Warmup(fraudSearch);
+
+if (!string.IsNullOrWhiteSpace(fdSocketPath))
+{
+    await RunFdReceiverAsync(fdSocketPath, fraudSearch);
+    return;
+}
 
 Socket listenSocket;
 EndPoint localEndPoint;
@@ -37,6 +47,40 @@ while (true)
     if (isTcp)
         client.NoDelay = true;
     _ = HandleClientAsync(client, fraudSearch);
+}
+
+static async Task RunFdReceiverAsync(string socketPath, IFraudSearch fraudSearch)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(socketPath)!);
+    if (File.Exists(socketPath))
+        File.Delete(socketPath);
+
+    using var control = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+    control.Bind(new UnixDomainSocketEndPoint(socketPath));
+    control.Listen(1024);
+
+    while (true)
+    {
+        Socket connection = await control.AcceptAsync();
+        _ = Task.Run(() => ReceivePassedSockets(connection, fraudSearch));
+    }
+}
+
+static void ReceivePassedSockets(Socket controlConnection, IFraudSearch fraudSearch)
+{
+    using (controlConnection)
+    {
+        while (true)
+        {
+            int fd = FdPassing.Receive(controlConnection);
+            if (fd < 0)
+                return;
+
+            var client = new Socket(new SafeSocketHandle((IntPtr)fd, ownsHandle: true));
+            client.NoDelay = true;
+            _ = HandleClientAsync(client, fraudSearch);
+        }
+    }
 }
 
 static async Task HandleClientAsync(Socket socket, IFraudSearch fraudSearch)
@@ -316,6 +360,77 @@ static void Warmup(IFraudSearch fraudSearch)
     {
         for (int i = 0; i < 500; i++)
             _ = fraudSearch.PredictFraudCount(payload.Span);
+    }
+}
+
+internal static unsafe class FdPassing
+{
+    private const int SolSocket = 1;
+    private const int ScmRights = 1;
+
+    public static int Receive(Socket socket)
+    {
+        byte data = 0;
+        Span<byte> control = stackalloc byte[64];
+        control.Clear();
+
+        byte* dataPtr = &data;
+        fixed (byte* controlPtr = control)
+        {
+            IOVec iov = new()
+            {
+                Base = dataPtr,
+                Length = (nuint)1
+            };
+
+            MsgHdr message = new()
+            {
+                Iov = &iov,
+                IovLen = (nuint)1,
+                Control = controlPtr,
+                ControlLen = (nuint)control.Length
+            };
+
+            nint received = recvmsg((int)socket.Handle, &message, 0);
+            if (received <= 0)
+                return -1;
+        }
+
+        nuint length = (nuint)IntPtr.Size == 8
+            ? (nuint)BinaryPrimitives.ReadUInt64LittleEndian(control)
+            : BinaryPrimitives.ReadUInt32LittleEndian(control);
+
+        if (length < 20)
+            return -1;
+
+        int level = BinaryPrimitives.ReadInt32LittleEndian(control.Slice(IntPtr.Size, 4));
+        int type = BinaryPrimitives.ReadInt32LittleEndian(control.Slice(IntPtr.Size + 4, 4));
+        if (level != SolSocket || type != ScmRights)
+            return -1;
+
+        return BinaryPrimitives.ReadInt32LittleEndian(control.Slice(16, 4));
+    }
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern nint recvmsg(int sockfd, MsgHdr* msg, int flags);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IOVec
+    {
+        public void* Base;
+        public nuint Length;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MsgHdr
+    {
+        public void* Name;
+        public uint NameLen;
+        public IOVec* Iov;
+        public nuint IovLen;
+        public void* Control;
+        public nuint ControlLen;
+        public int Flags;
     }
 }
 

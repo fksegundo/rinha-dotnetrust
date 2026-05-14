@@ -1,0 +1,12 @@
+services:
+  lb:
+    environment:
+      FD_UPSTREAMS: "/sockets/api1-fd.sock,/sockets/api2-fd.sock"
+
+  api1:
+    environment:
+      RINHA_FD_SOCKET: /sockets/api1-fd.sock
+
+  api2:
+    environment:
+      RINHA_FD_SOCKET: /sockets/api2-fd.sock
