@@ -9,5 +9,6 @@ resources/references.json.gz
 submission/.env
 artifacts/
 test-workdir/
+test/
 test/*.json
 .github/workflows/*.code-workspace
