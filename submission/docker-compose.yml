@@ -1,7 +1,7 @@
 services:
   lb:
-    image: ${LB_IMAGE:-rinha-lb:local}
-    pull_policy: never
+    image: ${LB_IMAGE:-ghcr.io/fksegundo/rinha-api-lb:latest}
+    pull_policy: always
     cpuset: "2,3"
     user: "0:0"
     security_opt:

@@ -1,4 +1,6 @@
 services:
+  lb:
+    pull_policy: never
   api1:
     pull_policy: never
   api2:
