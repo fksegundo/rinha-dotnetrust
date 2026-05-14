@@ -40,6 +40,7 @@ services:
       RINHA_SEARCH_BACKEND: ${RINHA_SEARCH_BACKEND:-rust}
       RINHA_SOCKET: /sockets/api1.sock
       RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
+      RINHA_MAX_LEAF_VISITS: ${RINHA_MAX_LEAF_VISITS:-0}
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
       DOTNET_GCConserveMemory: "9"
       DOTNET_GCHeapHardLimit: "134217728"
@@ -65,6 +66,7 @@ services:
       RINHA_SEARCH_BACKEND: ${RINHA_SEARCH_BACKEND:-rust}
       RINHA_SOCKET: /sockets/api2.sock
       RINHA_NATIVE_INDEX_PATH: /app/index/native.idx
+      RINHA_MAX_LEAF_VISITS: ${RINHA_MAX_LEAF_VISITS:-0}
       DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "1"
       DOTNET_GCConserveMemory: "9"
       DOTNET_GCHeapHardLimit: "125829120"

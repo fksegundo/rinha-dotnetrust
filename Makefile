@@ -14,6 +14,8 @@ EXTENDED_TEST_DATA_FILE ?= $(RESULTS_DIR)/extended-test-data.json
 RINHA_K6_TARGET_RATE ?= 900
 RINHA_K6_DURATION ?= 120s
 RINHA_K6_MAX_VUS ?= 250
+RINHA_NATIVE_LEAF_SIZE ?= 192
+RINHA_MAX_LEAF_VISITS ?= 0
 
 help:
 	@echo "Targets:"
@@ -29,13 +31,16 @@ help:
 	@echo "  logs        Follow compose logs"
 
 build:
-	@docker build -f submission/Dockerfile -t $(APP_IMAGE) .
+	@docker build \
+		--build-arg RINHA_NATIVE_LEAF_SIZE=$(RINHA_NATIVE_LEAF_SIZE) \
+		-f submission/Dockerfile \
+		-t $(APP_IMAGE) .
 
 build-lb:
 	@docker build -f $(LB_DIR)/Dockerfile -t $(LB_IMAGE) $(LB_DIR)
 
 up:
-	@APP_IMAGE=$(APP_IMAGE) LB_IMAGE=$(LB_IMAGE) $(COMPOSE) up -d --force-recreate
+	@APP_IMAGE=$(APP_IMAGE) LB_IMAGE=$(LB_IMAGE) RINHA_MAX_LEAF_VISITS=$(RINHA_MAX_LEAF_VISITS) $(COMPOSE) up -d --force-recreate
 	@echo "Waiting for /ready..."
 	@for i in $$(seq 1 60); do \
 		if curl -sf http://localhost:9999/ready >/dev/null; then echo "ready"; exit 0; fi; \
@@ -93,6 +98,8 @@ bench-diag: build up test-k6 capture-logs down
 capture-logs:
 	@mkdir -p $(RESULTS_DIR)
 	@$(COMPOSE) logs --no-color api1 api2 > $(RESULTS_DIR)/diag-api-logs.txt 2>&1 || true
+	@docker stats --no-stream --format '{{.Name}} {{.CPUPerc}} {{.MemUsage}} {{.MemPerc}}' > $(RESULTS_DIR)/docker-stats.txt 2>&1 || true
 	@echo "API logs captured to $(RESULTS_DIR)/diag-api-logs.txt"
+	@echo "Docker stats captured to $(RESULTS_DIR)/docker-stats.txt"
 	@echo "Last lines:"
 	@tail -30 $(RESULTS_DIR)/diag-api-logs.txt

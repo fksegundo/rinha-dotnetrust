@@ -1,7 +1,10 @@
 use std::ffi::CStr;
-use std::fs;
+use std::fs::File;
+use std::mem;
+use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr;
+use std::slice;
 
 #[cfg(target_os = "linux")]
 extern crate libc;
@@ -17,11 +20,69 @@ const TREE_STACK_CAPACITY: usize = 128;
 // ─── Native Index (Tree / RNATIDX2) ──────────────────────────────────────────
 
 pub struct NativeIndex {
+    _mapping: MmapRegion,
     partitions: Vec<Partition>,
     nodes: Vec<Node>,
-    vectors: Vec<i16>,
-    labels: Vec<u8>,
+    vectors: *const i16,
+    vectors_len: usize,
+    labels: *const u8,
+    labels_len: usize,
     has_avx2: bool,
+    max_leaf_visits: usize,
+}
+
+struct MmapRegion {
+    ptr: *mut u8,
+    len: usize,
+}
+
+impl MmapRegion {
+    fn open(path: &str) -> Result<Self, String> {
+        let file = File::open(path).map_err(|e| e.to_string())?;
+        let len = file.metadata().map_err(|e| e.to_string())?.len() as usize;
+        if len == 0 {
+            return Err("empty file".to_string());
+        }
+
+        #[cfg(target_os = "linux")]
+        unsafe {
+            let ptr = libc::mmap(
+                ptr::null_mut(),
+                len,
+                libc::PROT_READ,
+                libc::MAP_PRIVATE,
+                file.as_raw_fd(),
+                0,
+            );
+            if ptr == libc::MAP_FAILED {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
+
+            Ok(Self {
+                ptr: ptr.cast::<u8>(),
+                len,
+            })
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = file;
+            Err("mmap index loading requires linux".to_string())
+        }
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self.ptr.cast_const(), self.len) }
+    }
+}
+
+impl Drop for MmapRegion {
+    fn drop(&mut self) {
+        #[cfg(target_os = "linux")]
+        unsafe {
+            libc::munmap(self.ptr.cast::<libc::c_void>(), self.len);
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -43,7 +104,8 @@ struct Node {
 
 impl NativeIndex {
     fn open(path: &str) -> Result<Self, String> {
-        let bytes = fs::read(path).map_err(|e| e.to_string())?;
+        let mapping = MmapRegion::open(path)?;
+        let bytes = mapping.as_slice();
         if bytes.len() < 8 {
             return Err("file too short".to_string());
         }
@@ -51,10 +113,11 @@ impl NativeIndex {
         if magic != MAGIC_TREE {
             return Err(format!("unknown or unsupported magic: {:?}", magic));
         }
-        NativeIndex::load(&bytes)
+        NativeIndex::load(mapping)
     }
 
-    fn load(bytes: &[u8]) -> Result<Self, String> {
+    fn load(mapping: MmapRegion) -> Result<Self, String> {
+        let bytes = mapping.as_slice();
         let mut cursor = 8usize; // skip magic
 
         let _scale = read_i32(bytes, &mut cursor)?;
@@ -99,25 +162,44 @@ impl NativeIndex {
         }
 
         let vectors_len = total_blocks * DIMS * LANES;
-        let mut vectors = vec![0i16; vectors_len];
-        for x in &mut vectors {
-            *x = read_i16(bytes, &mut cursor)?;
+        let vectors_bytes = vectors_len * mem::size_of::<i16>();
+        if cursor % mem::align_of::<i16>() != 0 {
+            return Err("unaligned vectors section".to_string());
         }
+        if cursor + vectors_bytes > bytes.len() {
+            return Err("truncated vectors".to_string());
+        }
+        let vectors = unsafe { bytes.as_ptr().add(cursor).cast::<i16>() };
+        cursor += vectors_bytes;
 
         let labels_len = total_blocks * LANES;
         if cursor + labels_len > bytes.len() {
             return Err("truncated labels".to_string());
         }
-        let labels = bytes[cursor..cursor + labels_len].to_vec();
+        let labels = unsafe { bytes.as_ptr().add(cursor) };
 
         let has_avx2 = cfg!(target_arch = "x86_64") && std::arch::is_x86_feature_detected!("avx2");
+        let max_leaf_visits = std::env::var("RINHA_MAX_LEAF_VISITS")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(0);
 
         eprintln!(
-            "[RNATIDX2] loaded: {} partitions, {} nodes, {} blocks, avx2={}",
-            partition_count, node_count, total_blocks, has_avx2
+            "[RNATIDX2] mmap loaded: {} partitions, {} nodes, {} blocks, avx2={}, max_leaf_visits={}",
+            partition_count, node_count, total_blocks, has_avx2, max_leaf_visits
         );
 
-        let index = Self { partitions, nodes, vectors, labels, has_avx2 };
+        let index = Self {
+            _mapping: mapping,
+            partitions,
+            nodes,
+            vectors,
+            vectors_len,
+            labels,
+            labels_len,
+            has_avx2,
+            max_leaf_visits,
+        };
         index.advise_hugepages();
         Ok(index)
     }
@@ -125,6 +207,7 @@ impl NativeIndex {
     fn predict(&self, query: &[i16; PACKED_DIMS]) -> i32 {
         let mut best_dists = [i64::MAX; K];
         let mut best_labels = [0u8; K];
+        let mut leaf_visits = 0usize;
 
         let mut partition_entries = [(0i64, 0usize); MAX_PARTITIONS];
         let mut partition_len = 0usize;
@@ -149,7 +232,12 @@ impl NativeIndex {
                 query,
                 &mut best_dists,
                 &mut best_labels,
+                &mut leaf_visits,
             );
+
+            if self.max_leaf_visits > 0 && leaf_visits >= self.max_leaf_visits {
+                break;
+            }
         }
 
         best_labels.iter().map(|&l| l as i32).sum()
@@ -162,6 +250,7 @@ impl NativeIndex {
         query: &[i16; PACKED_DIMS],
         best_dists: &mut [i64; K],
         best_labels: &mut [u8; K],
+        leaf_visits: &mut usize,
     ) {
         let mut stack_nodes = [0usize; TREE_STACK_CAPACITY];
         let mut stack_bounds = [0i64; TREE_STACK_CAPACITY];
@@ -174,7 +263,11 @@ impl NativeIndex {
             if current_bound < best_dists[K - 1] {
                 let node = &self.nodes[current];
                 if node.left < 0 || node.right < 0 {
+                    if self.max_leaf_visits > 0 && *leaf_visits >= self.max_leaf_visits {
+                        break;
+                    }
                     self.scan_leaf(node, query, best_dists, best_labels);
+                    *leaf_visits += 1;
                 } else {
                     let l = node.left as usize;
                     let r = node.right as usize;
@@ -212,6 +305,10 @@ impl NativeIndex {
                 break;
             }
 
+            if self.max_leaf_visits > 0 && *leaf_visits >= self.max_leaf_visits {
+                break;
+            }
+
             stack_len -= 1;
             current = stack_nodes[stack_len];
             current_bound = stack_bounds[stack_len];
@@ -227,6 +324,8 @@ impl NativeIndex {
     ) {
         let start_block = node.start;
         let blocks = (node.len + LANES - 1) / LANES;
+        let vectors = self.vectors();
+        let labels = self.labels();
 
         for b in 0..blocks {
             let block_idx = start_block + b;
@@ -238,23 +337,23 @@ impl NativeIndex {
                     use std::arch::x86_64::*;
                     let next_base = (start_block + b + 1) * DIMS * LANES;
                     _mm_prefetch(
-                        self.vectors.as_ptr().add(next_base) as *const i8,
+                        self.vectors.add(next_base) as *const i8,
                         _MM_HINT_T0,
                     );
                 }
             }
 
             let dists = if self.has_avx2 {
-                scan_block_avx2(&self.vectors, block_base, query)
+                scan_block_avx2(vectors, block_base, query)
             } else {
-                scan_block_scalar(&self.vectors, block_base, query)
+                scan_block_scalar(vectors, block_base, query)
             };
             let labels_base = block_idx * LANES;
             let lane_count = (node.len - b * LANES).min(LANES);
             for i in 0..lane_count {
                 insert_best(
                     dists[i],
-                    self.labels[labels_base + i],
+                    labels[labels_base + i],
                     best_dists,
                     best_labels,
                 );
@@ -262,15 +361,23 @@ impl NativeIndex {
         }
     }
 
+    fn vectors(&self) -> &[i16] {
+        unsafe { slice::from_raw_parts(self.vectors, self.vectors_len) }
+    }
+
+    fn labels(&self) -> &[u8] {
+        unsafe { slice::from_raw_parts(self.labels, self.labels_len) }
+    }
+
     fn advise_hugepages(&self) {
         #[cfg(target_os = "linux")]
         unsafe {
-            let vptr = self.vectors.as_ptr() as *mut libc::c_void;
-            let vlen = self.vectors.len() * std::mem::size_of::<i16>();
+            let vptr = self.vectors as *mut libc::c_void;
+            let vlen = self.vectors_len * mem::size_of::<i16>();
             libc::madvise(vptr, vlen, libc::MADV_HUGEPAGE);
 
-            let lptr = self.labels.as_ptr() as *mut libc::c_void;
-            let llen = self.labels.len();
+            let lptr = self.labels as *mut libc::c_void;
+            let llen = self.labels_len;
             libc::madvise(lptr, llen, libc::MADV_HUGEPAGE);
         }
     }
