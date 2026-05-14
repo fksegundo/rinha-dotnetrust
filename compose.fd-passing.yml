@@ -2,11 +2,26 @@ services:
   lb:
     environment:
       FD_UPSTREAMS: "/sockets/api1-fd.sock,/sockets/api2-fd.sock"
+    deploy:
+      resources:
+        limits:
+          cpus: "${LB_CPUS:-0.14}"
+          memory: "${LB_MEMORY:-10MB}"
 
   api1:
     environment:
       RINHA_FD_SOCKET: /sockets/api1-fd.sock
+    deploy:
+      resources:
+        limits:
+          cpus: "${API1_CPUS:-0.43}"
+          memory: "${API1_MEMORY:-170MB}"
 
   api2:
     environment:
       RINHA_FD_SOCKET: /sockets/api2-fd.sock
+    deploy:
+      resources:
+        limits:
+          cpus: "${API2_CPUS:-0.43}"
+          memory: "${API2_MEMORY:-170MB}"

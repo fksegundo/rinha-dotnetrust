@@ -13,4 +13,5 @@ artifacts/
 test-workdir/
 test/
 test/*.json
+__pycache__/
 .github/workflows/*.code-workspace

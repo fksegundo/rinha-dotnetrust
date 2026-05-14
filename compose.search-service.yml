@@ -18,7 +18,7 @@ services:
       resources:
         limits:
           cpus: "${SEARCH_CPUS:-0.25}"
-          memory: "120MB"
+          memory: "${SEARCH_MEMORY:-120MB}"
 
   api1:
     cpuset: "1"
@@ -31,7 +31,7 @@ services:
       resources:
         limits:
           cpus: "${API1_CPUS:-0.30}"
-          memory: "100MB"
+          memory: "${API1_MEMORY:-100MB}"
 
   api2:
     cpuset: "2"
@@ -44,7 +44,7 @@ services:
       resources:
         limits:
           cpus: "${API2_CPUS:-0.30}"
-          memory: "100MB"
+          memory: "${API2_MEMORY:-100MB}"
 
   lb:
     cpuset: "3"
@@ -52,4 +52,4 @@ services:
       resources:
         limits:
           cpus: "${LB_CPUS:-0.15}"
-          memory: "40MB"
+          memory: "${LB_MEMORY:-40MB}"
