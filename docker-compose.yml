@@ -20,8 +20,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${LB_CPUS:-0.20}"
-          memory: "40MB"
+          cpus: "${LB_CPUS:-0.10}"
+          memory: "30MB"
     ulimits:
       nofile:
         soft: 65535
@@ -48,8 +48,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${API1_CPUS:-0.40}"
-          memory: "155MB"
+          cpus: "${API1_CPUS:-0.45}"
+          memory: "160MB"
 
   api2:
     image: ${APP_IMAGE:-ghcr.io/fksegundo/rinha-api:latest}
@@ -73,8 +73,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "${API2_CPUS:-0.40}"
-          memory: "155MB"
+          cpus: "${API2_CPUS:-0.45}"
+          memory: "160MB"
 
 volumes:
   sockets:
