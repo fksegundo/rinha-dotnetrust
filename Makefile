@@ -2,8 +2,9 @@
 
 COMPOSE ?= docker compose -f submission/docker-compose.yml -f compose.local.yml
 APP_IMAGE ?= rinha-dotnetrust-api:local
-LB_IMAGE ?= haproxy:3.0-alpine
+LB_IMAGE ?= rinha-lb:local
 K6_IMAGE ?= grafana/k6:latest
+LB_DIR ?= ../rinha-dotnetrust-lb
 OFFICIAL_TEST_DIR ?= ../rinha-de-backend-2026-main/test
 RESULTS_DIR ?= test
 TEST_DATA_FILE ?= $(OFFICIAL_TEST_DIR)/test-data.json
@@ -17,6 +18,7 @@ RINHA_K6_MAX_VUS ?= 250
 help:
 	@echo "Targets:"
 	@echo "  build       Build local API image ($(APP_IMAGE))"
+	@echo "  build-lb    Build local LB image ($(LB_IMAGE))"
 	@echo "  up          Start local stack"
 	@echo "  down        Stop local stack"
 	@echo "  test-k6     Run official k6 workload and write $(RESULTS_DIR)/results.json"
@@ -28,6 +30,9 @@ help:
 
 build:
 	@docker build -f submission/Dockerfile -t $(APP_IMAGE) .
+
+build-lb:
+	@docker build -f $(LB_DIR)/Dockerfile -t $(LB_IMAGE) $(LB_DIR)
 
 up:
 	@APP_IMAGE=$(APP_IMAGE) LB_IMAGE=$(LB_IMAGE) $(COMPOSE) up -d --force-recreate
