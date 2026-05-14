@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using Rinha.Core;
 
 ApplyRuntimeTuning();
@@ -34,16 +33,16 @@ listenSocket.Listen(4096);
 bool isTcp = listenSocket.AddressFamily == AddressFamily.InterNetwork || listenSocket.AddressFamily == AddressFamily.InterNetworkV6;
 while (true)
 {
-    Socket client = listenSocket.Accept();
+    Socket client = await listenSocket.AcceptAsync();
     if (isTcp)
         client.NoDelay = true;
-    _ = Task.Run(() => HandleClient(client, fraudSearch));
+    _ = HandleClientAsync(client, fraudSearch);
 }
 
-static void HandleClient(Socket socket, IFraudSearch fraudSearch)
+static async Task HandleClientAsync(Socket socket, IFraudSearch fraudSearch)
 {
     byte[] buffer = ArrayPool<byte>.Shared.Rent(8192);
-    Span<byte> writeBuf = stackalloc byte[256];
+    byte[] writeBuffer = ArrayPool<byte>.Shared.Rent(256);
     try
     {
         int offset = 0;
@@ -55,7 +54,7 @@ static void HandleClient(Socket socket, IFraudSearch fraudSearch)
             int headerEnd = -1;
             while (headerEnd == -1)
             {
-                int read = socket.Receive(buffer, offset, buffer.Length - offset, SocketFlags.None);
+                int read = await socket.ReceiveAsync(buffer.AsMemory(offset, buffer.Length - offset), SocketFlags.None);
                 if (read == 0) return;
                 offset += read;
 
@@ -77,79 +76,83 @@ static void HandleClient(Socket socket, IFraudSearch fraudSearch)
             if (firstLineEnd < 0) return;
             ReadOnlySpan<byte> firstLine = headerSpan.Slice(0, firstLineEnd);
 
-            bool isPost = firstLine.Length > 4 && firstLine[0] == (byte)'P' && firstLine[1] == (byte)'O';
-            bool isGet = !isPost && firstLine.Length > 3 && firstLine[0] == (byte)'G' && firstLine[1] == (byte)'E';
+            bool isPost = firstLine.Length >= 4 && firstLine[0] == (byte)'P' && firstLine[1] == (byte)'O' && firstLine[2] == (byte)'S' && firstLine[3] == (byte)'T';
+            bool isGet = firstLine.Length >= 3 && firstLine[0] == (byte)'G' && firstLine[1] == (byte)'E' && firstLine[2] == (byte)'T';
 
-            int pathStart = firstLine.IndexOf((byte)' ') + 1;
-            int pathEnd = firstLine.Slice(pathStart).IndexOf((byte)' ');
-            ReadOnlySpan<byte> path = firstLine.Slice(pathStart, pathEnd);
-            bool isReady = path.Length == 6 && path[1] == (byte)'r'; // /ready
-            bool isFraud = path.Length == 12 && path[1] == (byte)'f' && path[6] == (byte)'-' && path[7] == (byte)'s'; // /fraud-score
+            int methodEnd = firstLine.IndexOf((byte)' ');
+            if (methodEnd <= 0) return;
+
+            int pathStart = methodEnd + 1;
+            int relativePathEnd = firstLine[pathStart..].IndexOf((byte)' ');
+            if (relativePathEnd <= 0) return;
+
+            ReadOnlySpan<byte> path = firstLine.Slice(pathStart, relativePathEnd);
+            bool isReady = path.SequenceEqual("/ready"u8);
+            bool isFraud = path.SequenceEqual("/fraud-score"u8);
 
             // ---- extract Content-Length -----------------------------------
             int contentLength = 0;
             if (isPost)
             {
-                ReadOnlySpan<byte> clHeader = "content-length: "u8;
-                int clPos = headerSpan.IndexOf(clHeader);
-                if (clPos >= 0)
-                {
-                    int numStart = clPos + clHeader.Length;
-                    int numEnd = headerSpan.Slice(numStart).IndexOf("\r\n"u8);
-                    if (numEnd > 0)
-                    {
-                        ReadOnlySpan<byte> numSpan = headerSpan.Slice(numStart, numEnd);
-                        contentLength = ParseInt(numSpan);
-                    }
-                }
+                if (!TryGetHeaderValue(headerSpan, firstLineEnd + 2, "content-length"u8, out ReadOnlySpan<byte> contentLengthValue))
+                    return;
+
+                contentLength = ParseInt(contentLengthValue);
             }
 
             // ---- extract Connection ---------------------------------------
-            ReadOnlySpan<byte> connHeader = "connection: close"u8;
-            bool connectionClose = headerSpan.IndexOf(connHeader) >= 0;
+            bool connectionClose = TryGetHeaderValue(headerSpan, firstLineEnd + 2, "connection"u8, out ReadOnlySpan<byte> connectionValue) &&
+                EqualsAsciiIgnoreCase(connectionValue, "close"u8);
 
             // ---- read body ------------------------------------------------
             int bodyStart = headerEnd;
             int totalNeeded = bodyStart + contentLength;
+            if ((uint)totalNeeded > (uint)buffer.Length)
+                return;
+
             while (offset < totalNeeded)
             {
-                int read = socket.Receive(buffer, offset, buffer.Length - offset, SocketFlags.None);
+                int read = await socket.ReceiveAsync(buffer.AsMemory(offset, buffer.Length - offset), SocketFlags.None);
                 if (read == 0) return;
                 offset += read;
-                if (offset >= buffer.Length) return;
             }
 
             // ---- process request ------------------------------------------
             ReadOnlyMemory<byte> responseBody;
-            string contentType = "application/json";
+            bool plainText = false;
 
             if (isGet && isReady)
             {
                 responseBody = Responses.Ready;
-                contentType = "text/plain";
+                plainText = true;
             }
             else if (isPost && isFraud)
             {
+                if (contentLength <= 0)
+                    return;
+
                 ReadOnlySpan<byte> bodySpan = buffer.AsSpan(bodyStart, contentLength);
                 int frauds = fraudSearch.PredictFraudCount(bodySpan);
                 responseBody = Responses.ByFraudCount[frauds];
             }
             else
             {
-                responseBody = Responses.ByFraudCount[0];
+                await SendStatusAsync(socket, 404, connectionClose);
+                return;
             }
 
             // ---- write response -------------------------------------------
             ReadOnlySpan<byte> statusLine = connectionClose
                 ? "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: "u8
                 : "HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nContent-Type: "u8;
+            ReadOnlySpan<byte> contentType = plainText ? "text/plain"u8 : "application/json"u8;
 
             int pos = 0;
+            Span<byte> writeBuf = writeBuffer.AsSpan();
             statusLine.CopyTo(writeBuf.Slice(pos));
             pos += statusLine.Length;
-            ReadOnlySpan<byte> ctBytes = Encoding.UTF8.GetBytes(contentType);
-            ctBytes.CopyTo(writeBuf.Slice(pos));
-            pos += ctBytes.Length;
+            contentType.CopyTo(writeBuf.Slice(pos));
+            pos += contentType.Length;
             ReadOnlySpan<byte> lenPrefix = "\r\nContent-Length: "u8;
             lenPrefix.CopyTo(writeBuf.Slice(pos));
             pos += lenPrefix.Length;
@@ -158,8 +161,8 @@ static void HandleClient(Socket socket, IFraudSearch fraudSearch)
             sep.CopyTo(writeBuf.Slice(pos));
             pos += sep.Length;
 
-            socket.Send(writeBuf.Slice(0, pos));
-            socket.Send(responseBody.Span);
+            await SendAllAsync(socket, writeBuffer.AsMemory(0, pos));
+            await SendAllAsync(socket, responseBody);
 
             // ---- shift remaining bytes for next request --------------------
             int consumed = totalNeeded;
@@ -178,8 +181,87 @@ static void HandleClient(Socket socket, IFraudSearch fraudSearch)
     }
     finally
     {
+        ArrayPool<byte>.Shared.Return(writeBuffer);
         ArrayPool<byte>.Shared.Return(buffer);
         socket.Close();
+    }
+}
+
+static bool TryGetHeaderValue(ReadOnlySpan<byte> headers, int start, ReadOnlySpan<byte> name, out ReadOnlySpan<byte> value)
+{
+    value = default;
+    int cursor = start;
+
+    while (cursor < headers.Length)
+    {
+        int lineEnd = headers[cursor..].IndexOf("\r\n"u8);
+        if (lineEnd <= 0)
+            return false;
+
+        ReadOnlySpan<byte> line = headers.Slice(cursor, lineEnd);
+        int colon = line.IndexOf((byte)':');
+        if (colon > 0 && EqualsAsciiIgnoreCase(line.Slice(0, colon), name))
+        {
+            value = TrimHeaderValue(line[(colon + 1)..]);
+            return true;
+        }
+
+        cursor += lineEnd + 2;
+    }
+
+    return false;
+}
+
+static ReadOnlySpan<byte> TrimHeaderValue(ReadOnlySpan<byte> value)
+{
+    while (!value.IsEmpty && (value[0] == (byte)' ' || value[0] == (byte)'\t'))
+        value = value[1..];
+
+    while (!value.IsEmpty && (value[^1] == (byte)' ' || value[^1] == (byte)'\t'))
+        value = value[..^1];
+
+    return value;
+}
+
+static bool EqualsAsciiIgnoreCase(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+{
+    if (left.Length != right.Length)
+        return false;
+
+    for (int i = 0; i < left.Length; i++)
+    {
+        byte a = left[i];
+        byte b = right[i];
+        if (a >= (byte)'A' && a <= (byte)'Z')
+            a = (byte)(a | 0x20);
+        if (b >= (byte)'A' && b <= (byte)'Z')
+            b = (byte)(b | 0x20);
+        if (a != b)
+            return false;
+    }
+
+    return true;
+}
+
+static async Task SendStatusAsync(Socket socket, int statusCode, bool connectionClose)
+{
+    ReadOnlyMemory<byte> response = statusCode == 404
+        ? (connectionClose
+            ? Responses.NotFoundClose
+            : Responses.NotFoundKeepAlive)
+        : Responses.BadRequestClose;
+
+    await SendAllAsync(socket, response);
+}
+
+static async Task SendAllAsync(Socket socket, ReadOnlyMemory<byte> payload)
+{
+    while (!payload.IsEmpty)
+    {
+        int sent = await socket.SendAsync(payload, SocketFlags.None);
+        if (sent <= 0)
+            return;
+        payload = payload[sent..];
     }
 }
 
@@ -223,7 +305,7 @@ static void ApplyRuntimeTuning()
     if (!int.TryParse(Environment.GetEnvironmentVariable("RINHA_MIN_THREADS"), out int configured))
         return;
 
-    int minThreads = Math.Clamp(configured, 1, 64);
+    int minThreads = Math.Clamp(configured, 1, 512);
     ThreadPool.GetMinThreads(out _, out int minIoThreads);
     ThreadPool.SetMinThreads(minThreads, minIoThreads);
 }
@@ -240,6 +322,9 @@ static void Warmup(IFraudSearch fraudSearch)
 internal static class Responses
 {
     public static readonly ReadOnlyMemory<byte> Ready = "ok"u8.ToArray();
+    public static readonly ReadOnlyMemory<byte> NotFoundClose = "HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"u8.ToArray();
+    public static readonly ReadOnlyMemory<byte> NotFoundKeepAlive = "HTTP/1.1 404 Not Found\r\nConnection: keep-alive\r\nContent-Length: 0\r\n\r\n"u8.ToArray();
+    public static readonly ReadOnlyMemory<byte> BadRequestClose = "HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"u8.ToArray();
 
     public static readonly ReadOnlyMemory<byte>[] ByFraudCount =
     [
