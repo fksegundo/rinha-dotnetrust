@@ -2,7 +2,7 @@
 
 COMPOSE ?= docker compose -f submission/docker-compose.yml -f compose.local.yml
 APP_IMAGE ?= rinha-dotnetrust-api:local
-LB_IMAGE ?= filonsegundo/rinha-dotnetrust-lb:submission
+LB_IMAGE ?= haproxy:3.0-alpine
 K6_IMAGE ?= grafana/k6:latest
 OFFICIAL_TEST_DIR ?= ../rinha-de-backend-2026-main/test
 RESULTS_DIR ?= test
@@ -81,3 +81,13 @@ test-k6-extended: generate-extended
 bench-local: build up test-k6 down
 
 bench-extended: build up test-k6-extended down
+
+# Diagnostic bench: keeps containers up after k6, dumps API logs, then tears down.
+bench-diag: build up test-k6 capture-logs down
+
+capture-logs:
+	@mkdir -p $(RESULTS_DIR)
+	@$(COMPOSE) logs --no-color api1 api2 > $(RESULTS_DIR)/diag-api-logs.txt 2>&1 || true
+	@echo "API logs captured to $(RESULTS_DIR)/diag-api-logs.txt"
+	@echo "Last lines:"
+	@tail -30 $(RESULTS_DIR)/diag-api-logs.txt
