@@ -1,7 +1,7 @@
 services:
   lb:
-    image: ${LB_IMAGE:-haproxy:3.0-alpine}
-    pull_policy: always
+    image: ${LB_IMAGE:-rinha-lb:local}
+    pull_policy: never
     cpuset: "2,3"
     user: "0:0"
     security_opt:
@@ -13,7 +13,10 @@ services:
       - "9999:9999"
     volumes:
       - sockets:/sockets
-      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    environment:
+      PORT: "9999"
+      UPSTREAMS: "/sockets/api1.sock,/sockets/api2.sock"
+      WORKERS: "2"
     deploy:
       resources:
         limits:
